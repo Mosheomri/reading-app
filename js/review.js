@@ -60,11 +60,12 @@
       '- בשדה original העתק את הקטע בדיוק כפי שהוא מופיע בטקסט, כולל הניקוד.',
       '- בשדה fix כתוב את הקטע המתוקן, בניקוד מלא.',
       '- בשדה reason כתוב הסבר קצר בעברית.',
+      '- בשדה type כתוב "error" אם זו שגיאה (איות או דקדוק), או "style" אם זו הצעת ניסוח.',
       '- אם אין מה לתקן, החזר רשימה ריקה: [].',
       '',
       'החזר JSON בלבד בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, במבנה הזה:',
       '[',
-      '  { "field": "story", "original": "הקטע המקורי", "fix": "הקטע המתוקן", "reason": "הסבר קצר" }',
+      '  { "field": "story", "type": "error", "original": "הקטע המקורי", "fix": "הקטע המתוקן", "reason": "הסבר קצר" }',
       ']',
       '',
       'הטקסטים לבדיקה:',
@@ -80,7 +81,12 @@
     return null;
   }
 
-  // Returns {items: [{field, original, fix, reason}]} or {error}.
+  // 'style' for wording suggestions; anything else (or missing) is treated as an error.
+  function suggestionType(t) {
+    return /^(style|ניסוח|הצעת ניסוח)$/i.test(String(t || '').trim()) ? 'style' : 'error';
+  }
+
+  // Returns {items: [{field, type, original, fix, reason}]} or {error}.
   function parseSuggestions(text) {
     var s = String(text || '').replace(/```(?:json|JSON)?/g, '');
     var list = null;
@@ -104,6 +110,7 @@
     var items = list.filter(function (x) { return x && typeof x === 'object'; }).map(function (x) {
       return {
         field: String(x.field || '').trim(),
+        type: suggestionType(x.type),
         original: H.normalize(String(x.original || '')).trim(),
         fix: H.normalize(String(x.fix || '')).trim(),
         reason: String(x.reason || '').trim()

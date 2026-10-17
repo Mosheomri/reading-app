@@ -483,3 +483,18 @@ body.play .wrap { max-width: 900px; padding-top: 0; }
   font-weight: 600;
   vertical-align: middle;
 }
+/* Review cards: errors red, wording suggestions gray */
+.review-item.error { border-color: #e7b7b7; background: #fdf3f3; }
+.review-item.style { border-color: #d9d9d9; background: #f5f5f4; }
+.review-item .kind {
+  display: inline-block;
+  margin-inline-start: 8px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.review-item.error .kind { background: var(--bad-soft); color: var(--bad); }
+.review-item.style .kind { background: #e7e5e2; color: #55595e; }
+.review-item.accepted { border-color: var(--good); background: var(--good-soft); }

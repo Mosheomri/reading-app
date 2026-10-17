@@ -524,8 +524,13 @@
     var label = loc ? loc.slot.label : ownSlot ? ownSlot.label : (item.field || 'שדה לא ידוע');
     var status = el('span', { class: 'review-status' });
     var actions = el('div', { class: 'row' });
-    var card = el('div', { class: 'review-item' },
-      el('div', { class: 'review-head' }, el('strong', null, label), status),
+    var isStyle = item.type === 'style';
+    var card = el('div', { class: 'review-item ' + (isStyle ? 'style' : 'error') },
+      el('div', { class: 'review-head' },
+        el('span', null,
+          el('strong', null, label),
+          el('span', { class: 'kind' }, isStyle ? 'הצעת ניסוח' : 'שגיאה')),
+        status),
       el('div', { class: 'review-diff' },
         el('del', null, item.original), el('span', { class: 'muted', 'aria-hidden': 'true' }, ' ← '), el('ins', null, item.fix)),
       item.reason ? el('p', { class: 'muted small' }, item.reason) : null,
