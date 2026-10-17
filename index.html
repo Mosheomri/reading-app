@@ -89,6 +89,7 @@
       <div class="row" style="margin-bottom:12px">
         <button type="button" class="btn primary big" id="copyPrompt">📋 העתק</button>
       </div>
+      <p class="muted small">העתיקו את התשובה בכפתור ההעתקה שמעל בלוק הקוד. אם הבינה יצרה קובץ, אפשר לטעון אותו בכפתור טעינת קובץ.</p>
       <details>
         <summary class="muted small" style="cursor:pointer;margin-bottom:8px">הצגת הפרומפט</summary>
         <pre class="prompt" id="promptText"></pre>
@@ -106,6 +107,11 @@
       <p class="muted">העתיקו את כל התשובה של הבינה והדביקו כאן.</p>
       <div class="field">
         <textarea id="response" rows="10" class="code" placeholder="{ ... }"></textarea>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <span class="muted small">הבינה יצרה קובץ?</span>
+        <button type="button" class="btn small quiet" id="responseFileBtn">📂 טעינת קובץ</button>
+        <input type="file" id="responseFileInput" accept=".json,.txt,application/json,text/plain" hidden>
       </div>
       <div class="msgs" id="parseMsgs"></div>
       <div id="fixBox" hidden>

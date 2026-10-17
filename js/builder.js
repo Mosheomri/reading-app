@@ -159,8 +159,8 @@
         ? 'לא מצאתי JSON בתשובה. ודאו שהעתקתם את כל התשובה.'
         : 'ה-JSON בתשובה לא תקין. ייתכן שהתשובה נקטעה באמצע.'));
       showFix(noJson
-        ? 'החזר את התשובה כ-JSON בלבד, בלי שום טקסט לפניו או אחריו, במבנה שביקשתי.'
-        : 'ה-JSON ששלחת לא תקין או נקטע באמצע. החזר שוב את ה-JSON המלא בלבד, בלי שום טקסט לפניו או אחריו.');
+        ? 'החזר את התשובה כ-JSON בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, במבנה שביקשתי.'
+        : 'ה-JSON ששלחת לא תקין או נקטע באמצע. החזר שוב את ה-JSON המלא בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו.');
       return;
     }
 
@@ -177,16 +177,34 @@
       if (!lesson.topic) lesson.topic = state.settings.topic;
     }
     var res = L.check(lesson, state.request);
-    if (!res.errors.length && !res.warnings.length) {
+    // Automatic fixes (c.notes) are shown as warnings but not sent back to the AI.
+    var warnings = c.notes.concat(res.warnings);
+    if (!res.errors.length && !warnings.length) {
       acceptLesson(lesson, state.request);
       return;
     }
     if (res.errors.length) msgs.appendChild(msgBox('error', 'צריך לתקן:', res.errors));
-    if (res.warnings.length) msgs.appendChild(msgBox('warn', 'שימו לב:', res.warnings));
-    msgs.appendChild(msgBox('info', 'אפשר לשלוח לבינה הודעת תיקון, או להמשיך ולתקן בעצמכם בשלב העריכה.'));
-    showFix(L.fixMessage(res.errors.concat(res.warnings)));
+    if (warnings.length) msgs.appendChild(msgBox('warn', 'שימו לב:', warnings));
+    var problems = res.errors.concat(res.warnings);
+    if (problems.length) {
+      msgs.appendChild(msgBox('info', 'אפשר לשלוח לבינה הודעת תיקון, או להמשיך ולתקן בעצמכם בשלב העריכה.'));
+      showFix(L.fixMessage(problems));
+    }
     pendingLesson = lesson;
+    $('continueAnyway').textContent = res.errors.length ? 'להמשיך לעריכה בכל זאת ←' : 'להמשיך לעריכה ←';
     $('continueAnyway').hidden = false;
+  }
+
+  function loadResponseFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      $('response').value = reader.result;
+      parseResponse();
+    };
+    reader.onerror = function () {
+      U.clear($('parseMsgs')).appendChild(msgBox('error', 'לא הצלחתי לקרוא את הקובץ.'));
+    };
+    reader.readAsText(file);
   }
 
   function showFix(text) {
@@ -455,6 +473,11 @@
 
     $('copyPrompt').addEventListener('click', function () { copy($('promptText').textContent, 'הפרומפט הועתק! עכשיו הדביקו בצ׳אט.'); });
     $('parseBtn').addEventListener('click', parseResponse);
+    $('responseFileBtn').addEventListener('click', function () { $('responseFileInput').click(); });
+    $('responseFileInput').addEventListener('change', function () {
+      if (this.files && this.files[0]) loadResponseFile(this.files[0]);
+      this.value = '';
+    });
     $('copyFix').addEventListener('click', function () { copy($('fixText').textContent); });
     $('continueAnyway').addEventListener('click', function () {
       if (pendingLesson) acceptLesson(pendingLesson, state.request);

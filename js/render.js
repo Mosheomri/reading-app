@@ -45,7 +45,7 @@
     parts.forEach(function (part, i) {
       out.appendChild(document.createTextNode(text(lesson, part)));
       if (i < parts.length - 1) {
-        out.appendChild(el('span', { class: 'blank' + (filled ? ' filled' : '') }, filled ? text(lesson, filled) : ' '));
+        out.appendChild(el('span', { class: 'blank' + (filled ? ' filled' : '') }, filled ? text(lesson, filled) : '\u00A0'));
       }
     });
     return out;

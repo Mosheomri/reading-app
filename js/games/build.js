@@ -37,7 +37,7 @@
 
         var slotsBox = el('div', { class: 'slots' });
         var slots = clusters.map(function (c) {
-          var s = el('div', { class: 'slot' + (c.space ? ' filled' : '') }, c.space ? '' : ' ');
+          var s = el('div', { class: 'slot' + (c.space ? ' filled' : '') }, c.space ? '' : '\u00A0');
           if (c.space) s.style.borderColor = 'transparent';
           slotsBox.appendChild(s);
           return s;

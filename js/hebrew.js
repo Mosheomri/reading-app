@@ -4,12 +4,12 @@
 
   // Points and cantillation in U+0591–U+05C7, minus the punctuation that lives
   // in the same block: maqaf (05BE), paseq (05C0), sof pasuq (05C3), nun hafukha (05C6).
-  var MARKS_RE = /[֑-ׇֽֿׁׂׅׄ]/g;
-  var INVISIBLE_RE = /[​-‍⁠﻿]/g;
+  var MARKS_RE = /[\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]/g;
+  var INVISIBLE_RE = /[\u200B-\u200D\u2060\uFEFF]/g;
   var PREFIX_RE = /^[ושהבכלמ]{1,3}$/;
   // A word: letters/marks/digits, optionally joined by geresh/gershayim/quotes
   // (צ׳יפס, צה"ל), optionally ending with a geresh (ג׳).
-  var WORD_RE = /[\p{L}\p{M}\p{N}]+(?:[׳״'"][\p{L}\p{M}\p{N}]+)*[׳']?/gu;
+  var WORD_RE = /[\p{L}\p{M}\p{N}]+(?:[\u05F3\u05F4'"][\p{L}\p{M}\p{N}]+)*[\u05F3']?/gu;
 
   function normalize(s) {
     // NFC applies canonical mark ordering and decomposes presentation forms
@@ -90,7 +90,7 @@
 
   // Split a word into letter clusters: base character + its marks (+ trailing geresh).
   function graphemes(word) {
-    return normalize(word).match(/[^\p{M}][\p{M}]*[׳']?/gu) || [];
+    return normalize(word).match(/[^\p{M}][\p{M}]*[\u05F3']?/gu) || [];
   }
 
   window.Hebrew = {

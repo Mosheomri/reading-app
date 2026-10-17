@@ -15,7 +15,7 @@
   /* ---------- Extract JSON from an AI chat response ---------- */
 
   function extractJson(text) {
-    var s = String(text || '').replace(/^﻿/, '');
+    var s = String(text || '').replace(/^\uFEFF/, '');
     s = s.replace(/```(?:json|JSON)?/g, '');
     var start = s.indexOf('{');
     var end = s.lastIndexOf('}');
@@ -24,7 +24,7 @@
     var attempts = [
       s,
       // Smart quotes some chat UIs produce, and trailing commas.
-      s.replace(/[“”„‟]/g, '"').replace(/,\s*([}\]])/g, '$1')
+      s.replace(/[\u201C\u201D\u201E\u201F]/g, '"').replace(/,\s*([}\]])/g, '$1')
     ];
     var lastErr = null;
     for (var i = 0; i < attempts.length; i++) {
@@ -88,19 +88,45 @@
     }
   }
 
-  // Returns {lesson, fatal: [messages]}. A lesson is returned whenever it can be
-  // previewed/edited; fatal lists problems that make that impossible.
+  // Emoji plus their modifiers (skin tones, variation selector, keycap, ZWJ).
+  var EMOJI_RE = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{1F3FB}-\u{1F3FF}\uFE0F\u20E3\u200D]/gu;
+
+  // A run of emoji together with the spaces around it.
+  var EMOJI_RUN_RE = new RegExp('[ \\t]*(?:' + EMOJI_RE.source + ')+([ \\t]*)', 'gu');
+
+  function stripEmoji(text) {
+    if (!EMOJI_RE.test(text)) return { text: text, removed: false };
+    EMOJI_RE.lastIndex = 0;
+    var cleaned = text.replace(EMOJI_RUN_RE, function (run, after, offset, all) {
+      var prev = all.charAt(offset - 1);
+      var next = all.charAt(offset + run.length);
+      if (!prev || /\s/.test(prev)) return '';
+      // Keep one space between words ("כלב 🐕 רץ"), none before closing punctuation ("טוב! 👍"").
+      if (/[\p{L}\p{N}]/u.test(next)) return ' ';
+      return after && next && !/[.,!?:;)\]]/.test(next) ? ' ' : '';
+    });
+    cleaned = cleaned.split('\n').map(function (line) { return line.trim(); }).join('\n');
+    return { text: cleaned, removed: true };
+  }
+
+  // Returns {lesson, fatal: [messages], notes: [messages]}. A lesson is returned whenever
+  // it can be previewed/edited; fatal lists problems that make that impossible;
+  // notes lists automatic fixes that were applied.
   function coerce(raw) {
     var fatal = [];
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      return { lesson: null, fatal: ['התשובה אינה אובייקט JSON של שיעור.'] };
+      return { lesson: null, fatal: ['התשובה אינה אובייקט JSON של שיעור.'], notes: [] };
     }
     var story = raw.story;
     if (Array.isArray(story)) story = story.join('\n');
     if (typeof story !== 'string' || !story.trim()) fatal.push('חסר השדה "story" (הסיפור).');
     if (!Array.isArray(raw.targetWords)) fatal.push('חסר השדה "targetWords" (מילות היעד) או שהוא אינו רשימה.');
     if (!Array.isArray(raw.exercises)) fatal.push('חסר השדה "exercises" (התרגילים) או שהוא אינו רשימה.');
-    if (fatal.length) return { lesson: null, fatal: fatal };
+    if (fatal.length) return { lesson: null, fatal: fatal, notes: [] };
+
+    var notes = [];
+    var cleanStory = stripEmoji(H.normalize(story));
+    if (cleanStory.removed) notes.push('הוסרו אימוג׳י מתוך הסיפור.');
 
     var lesson = {
       version: 1,
@@ -112,10 +138,10 @@
         t = t || {};
         return { word: str(t.word || t.text), emoji: str(t.emoji) };
       }),
-      story: H.normalize(story).replace(/\r\n?/g, '\n').trim(),
+      story: cleanStory.text.replace(/\r\n?/g, '\n').trim(),
       exercises: raw.exercises.map(coerceExercise)
     };
-    return { lesson: lesson, fatal: [] };
+    return { lesson: lesson, fatal: [], notes: notes };
   }
 
   /* ---------- Validation ---------- */
@@ -214,7 +240,7 @@
     if (!problems.length) return '';
     return 'יש כמה בעיות בתשובה שלך:\n' +
       problems.map(function (p) { return '- ' + p; }).join('\n') +
-      '\n\nתקן אותן והחזר את ה-JSON המלא והמתוקן בלבד, בלי שום טקסט לפניו או אחריו, באותו מבנה ובניקוד מלא.';
+      '\n\nתקן אותן והחזר את ה-JSON המלא והמתוקן בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, באותו מבנה ובניקוד מלא.';
   }
 
   /* ---------- Link encode / decode ---------- */
