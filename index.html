@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>בונים שיעור קריאה</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E📖%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="wrap" id="wrap">
+    <header>
+      <h1>📖 בונים שיעור קריאה</h1>
+      <p class="muted">יוצרים סיפור, משחקים ותרגילים בעזרת הבינה המלאכותית שלכם, ושולחים לילד קישור. בלי הרשמה, ושום מידע לא נשמר בשרת.</p>
+    </header>
+
+    <ol class="steps" id="steps">
+      <li data-step="1">1. הגדרות</li>
+      <li data-step="2">2. פרומפט</li>
+      <li data-step="3">3. תשובה</li>
+      <li data-step="4">4. עריכה</li>
+      <li data-step="5">5. קישור</li>
+    </ol>
+
+    <!-- Step 1: settings -->
+    <section id="step1" class="card" hidden>
+      <h2>מה נלמד היום?</h2>
+      <form id="settingsForm" novalidate>
+        <div class="field">
+          <label for="topic">נושא</label>
+          <input type="text" id="topic" required placeholder="למשל: כלב בגינה">
+        </div>
+
+        <div class="field">
+          <label for="length">אורך הסיפור (מספר מילים)</label>
+          <input type="number" id="length" class="narrow" min="20" max="400" step="10" value="100" inputmode="numeric">
+          <div class="hint">בין 20 ל-400 מילים.</div>
+        </div>
+
+        <div class="field">
+          <span class="label">מילות יעד</span>
+          <div class="choices">
+            <label class="choice"><input type="radio" name="wordsMode" value="number" checked> הבינה תבחר</label>
+            <label class="choice"><input type="radio" name="wordsMode" value="list"> אני אכתוב</label>
+          </div>
+          <div id="wordsNumberBox" class="field" style="margin-top:10px">
+            <label for="wordCount">כמה מילים?</label>
+            <input type="number" id="wordCount" class="narrow" min="2" max="10" value="4" inputmode="numeric">
+          </div>
+          <div id="wordsListBox" class="field" style="margin-top:10px" hidden>
+            <label for="wordList">המילים (מופרדות בפסיק או בשורה חדשה)</label>
+            <textarea id="wordList" rows="3" placeholder="כלב, גינה, כדור"></textarea>
+            <div class="hint">בין 2 ל-10 מילים. אפשר בלי ניקוד, הבינה תנקד.</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="label">ניקוד אצל הילד</span>
+          <div class="choices">
+            <label class="choice"><input type="radio" name="nikud" value="full" checked> מלא</label>
+            <label class="choice"><input type="radio" name="nikud" value="partial"> חלקי (רק מילות היעד)</label>
+            <label class="choice"><input type="radio" name="nikud" value="none"> בלי ניקוד</label>
+          </div>
+        </div>
+
+        <div class="msgs" id="settingsMsgs"></div>
+
+        <div class="row">
+          <button type="submit" class="btn primary big">יצירת פרומפט ←</button>
+        </div>
+      </form>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:24px 0 16px">
+      <div class="row">
+        <button type="button" class="btn small" id="resumeDraft" hidden>להמשיך לערוך את השיעור האחרון</button>
+        <button type="button" class="btn small quiet" id="loadJsonBtn">טעינת קובץ שיעור (JSON)</button>
+        <input type="file" id="loadJsonInput" accept=".json,application/json" hidden>
+      </div>
+      <div class="msgs" id="loadMsgs"></div>
+    </section>
+
+    <!-- Step 2: prompt -->
+    <section id="step2" class="card" hidden>
+      <h2>העתיקו את הפרומפט</h2>
+      <p>הדביקו בצ׳אט של הבינה שלכם ושלחו.<br><span class="muted small">מתאים לכל צ׳אט: <bdi>ChatGPT</bdi>, <bdi>Gemini</bdi> ואחרים.</span></p>
+      <div class="row" style="margin-bottom:12px">
+        <button type="button" class="btn primary big" id="copyPrompt">📋 העתק</button>
+      </div>
+      <details>
+        <summary class="muted small" style="cursor:pointer;margin-bottom:8px">הצגת הפרומפט</summary>
+        <pre class="prompt" id="promptText"></pre>
+      </details>
+      <div class="row" style="margin-top:16px">
+        <button type="button" class="btn quiet" data-go="1">→ חזרה</button>
+        <span class="grow"></span>
+        <button type="button" class="btn primary" data-go="3">קיבלתי תשובה ←</button>
+      </div>
+    </section>
+
+    <!-- Step 3: paste response -->
+    <section id="step3" class="card" hidden>
+      <h2>הדביקו את התשובה</h2>
+      <p class="muted">העתיקו את כל התשובה של הבינה והדביקו כאן.</p>
+      <div class="field">
+        <textarea id="response" rows="10" class="code" placeholder="{ ... }"></textarea>
+      </div>
+      <div class="msgs" id="parseMsgs"></div>
+      <div id="fixBox" hidden>
+        <p><strong>אפשר לשלוח לבינה את ההודעה הזו כדי שתתקן:</strong></p>
+        <pre class="prompt" id="fixText"></pre>
+        <div class="row" style="margin-bottom:12px">
+          <button type="button" class="btn" id="copyFix">📋 העתק הודעת תיקון</button>
+        </div>
+      </div>
+      <div class="row">
+        <button type="button" class="btn quiet" data-go="2">→ חזרה</button>
+        <span class="grow"></span>
+        <button type="button" class="btn" id="continueAnyway" hidden>להמשיך לעריכה בכל זאת ←</button>
+        <button type="button" class="btn primary" id="parseBtn">בדיקה ←</button>
+      </div>
+    </section>
+
+    <!-- Step 4: preview & edit -->
+    <section id="step4" hidden>
+      <div class="editor-grid">
+        <div class="card" id="editorCol">
+          <h2>עריכה</h2>
+          <div id="editor"></div>
+        </div>
+        <div class="preview-col">
+          <div class="card">
+            <h2>כך הילד יראה</h2>
+            <div class="msgs" id="checkMsgs"></div>
+            <div class="preview" id="preview"></div>
+            <div class="row" style="margin-top:16px">
+              <button type="button" class="btn quiet" data-go="3">→ חזרה</button>
+              <span class="grow"></span>
+              <button type="button" class="btn primary big" id="makeLink">יצירת קישור ←</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 5: link -->
+    <section id="step5" class="card" hidden>
+      <h2>🎉 הקישור מוכן</h2>
+      <p>שלחו את הקישור לילד. השיעור כולו נמצא בתוך הקישור עצמו.</p>
+      <div class="link-box" id="linkBox"></div>
+      <p class="muted small" id="linkInfo"></p>
+      <div class="row" style="margin-bottom:16px">
+        <button type="button" class="btn primary" id="copyLink">📋 העתק קישור</button>
+        <a class="btn" id="waLink" target="_blank" rel="noopener">💬 שלח בוואטסאפ</a>
+        <a class="btn" id="openLink" target="_blank" rel="noopener">▶️ פתח לבדיקה</a>
+      </div>
+      <h3>גיבוי</h3>
+      <p class="muted small">שמרו את קובץ השיעור כדי לערוך אותו שוב בעתיד (בעמוד הראשון: "טעינת קובץ שיעור").</p>
+      <div class="row" style="margin-bottom:16px">
+        <button type="button" class="btn" id="downloadJson">⬇️ הורדת קובץ שיעור</button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn quiet" data-go="4">→ חזרה לעריכה</button>
+        <span class="grow"></span>
+        <button type="button" class="btn quiet" id="newLesson">שיעור חדש</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="js/lz-string.min.js"></script>
+  <script src="js/hebrew.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/lesson.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/prompt.js"></script>
+  <script src="js/builder.js"></script>
+</body>
+</html>
