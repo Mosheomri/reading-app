@@ -472,3 +472,14 @@ body.play .wrap { max-width: 900px; padding-top: 0; }
 .pick .pick-word { font-size: 1.5rem; line-height: 1.5; }
 .pick.selected { border-color: var(--good); background: var(--good-soft); }
 .pick.selected .pick-label::after { content: ' ✓'; color: var(--good); }
+.tag {
+  display: inline-block;
+  margin-inline-start: 8px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: #7a5212;
+  font-size: 0.8rem;
+  font-weight: 600;
+  vertical-align: middle;
+}

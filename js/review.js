@@ -178,7 +178,13 @@
     return H.normalize(a).replace(IGNORE_RE, '') === H.normalize(b).replace(IGNORE_RE, '');
   }
 
-  // Returns {error, details} or {diffs: [{slot, index, ai, dicta, before, after, choice}]}.
+  // Letters without matres lectionis: ktiv male (דיקטה) and ktiv haser (הבינה) compare equal.
+  function looseLetters(w) {
+    return H.bare(w).replace(/[וי]/g, '');
+  }
+
+  // Returns {error, details} or {diffs: [{slot, index, ai, dicta, spelling, before, after, choice}]}.
+  // spelling: the words differ only in ו/י (ktiv male vs. haser).
   function compareNikud(lesson, pasted) {
     var ours = [];
     slots(lesson, true).forEach(function (slot) {
@@ -212,7 +218,7 @@
 
     var letterDiffs = [];
     ours.forEach(function (o, i) {
-      if (H.bare(o.text) !== H.bare(theirs[i])) letterDiffs.push('"' + H.stripNikud(o.text) + '" מול "' + H.stripNikud(theirs[i]) + '"');
+      if (looseLetters(o.text) !== looseLetters(theirs[i])) letterDiffs.push('"' + H.stripNikud(o.text) + '" מול "' + H.stripNikud(theirs[i]) + '"');
     });
     if (letterDiffs.length) {
       return {
@@ -224,13 +230,15 @@
 
     var diffs = [];
     ours.forEach(function (o, i) {
-      if (sameNikud(o.text, theirs[i])) return;
+      var spelling = H.bare(o.text) !== H.bare(theirs[i]);
+      if (!spelling && sameNikud(o.text, theirs[i])) return;
       var slotWords = words(o.slot.get());
       diffs.push({
         slot: o.slot,
         index: o.index,
         ai: o.text,
         dicta: H.normalize(theirs[i]),
+        spelling: spelling,
         before: slotWords.slice(Math.max(0, o.index - 3), o.index).join(' '),
         after: slotWords.slice(o.index + 1, o.index + 4).join(' '),
         choice: 'ai'

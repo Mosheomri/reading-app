@@ -566,7 +566,7 @@
     nikud = { diffs: r.diffs, signature: RV.signature(state.lesson) };
     if (!r.diffs.length) { msgs.appendChild(msgBox('ok', 'הניקוד זהה לניקוד של דיקטה ✓')); return; }
 
-    msgs.appendChild(msgBox('info', 'נמצאו ' + r.diffs.length + ' מילים עם ניקוד שונה. בחרו לכל מילה את הגרסה הנכונה.'));
+    msgs.appendChild(msgBox('info', 'נמצאו ' + r.diffs.length + ' מילים שונות (בניקוד או בכתיב). בחרו לכל מילה את הגרסה הנכונה.'));
     var acceptAll = el('button', { type: 'button', class: 'btn small' }, 'קבל את כל דיקטה');
     list.appendChild(el('div', { class: 'row', style: 'margin-bottom:10px' }, acceptAll));
     var rows = r.diffs.map(nikudRow);
@@ -582,7 +582,8 @@
     var node = el('div', { class: 'nikud-row' },
       el('div', { class: 'nikud-context' },
         el('span', { class: 'muted small' }, d.slot.label + ': '),
-        d.before ? H.stripNikud(d.before) + ' ' : '', el('mark', null, H.stripNikud(d.ai)), d.after ? ' ' + H.stripNikud(d.after) : ''),
+        d.before ? H.stripNikud(d.before) + ' ' : '', el('mark', null, H.stripNikud(d.ai)), d.after ? ' ' + H.stripNikud(d.after) : '',
+        d.spelling ? el('span', { class: 'tag', title: 'המילים שונות רק ב-ו או ב-י (כתיב מלא מול כתיב חסר)' }, 'כתיב שונה') : null),
       el('div', { class: 'row' }, aiBtn, dictaBtn));
 
     function show() {
