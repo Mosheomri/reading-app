@@ -71,7 +71,7 @@
     if (n === 2 && !$('promptText').textContent) n = 1;
     state.step = n;
     state.maxStep = Math.max(state.maxStep, n);
-    for (var i = 1; i <= 5; i++) $('step' + i).hidden = i !== n;
+    for (var i = 1; i <= 6; i++) $('step' + i).hidden = i !== n;
     $('wrap').classList.toggle('wide', n === 4);
     Array.prototype.forEach.call($('steps').children, function (li) {
       var s = +li.dataset.step;
@@ -79,7 +79,8 @@
       li.style.cursor = s <= state.maxStep && s !== n ? 'pointer' : '';
     });
     if (n === 4) renderEditor();
-    if (n === 5) renderLink();
+    if (n === 5) enterCheckStep();
+    if (n === 6) renderLink();
     window.scrollTo(0, 0);
   }
 
@@ -217,6 +218,7 @@
     state.lesson = lesson;
     state.request = request;
     state.maxStep = Math.min(state.maxStep, 4);
+    resetCheckStep();
     saveDraftSoon();
     showStep(4);
   }
@@ -258,7 +260,7 @@
   }
 
   function textInput(value, onChange, attrs) {
-    var input = el('input', Object.assign({ type: 'text', value: value }, attrs || {}));
+    var input = el('input', Object.assign({ type: 'text', value: value, spellcheck: 'true', lang: 'he' }, attrs || {}));
     input.addEventListener('input', function () { onChange(H.normalize(input.value)); changed(); });
     input.addEventListener('change', function () { onChange(H.normalize(input.value).trim()); changed(); });
     return input;
@@ -301,7 +303,7 @@
     root.appendChild(twBox);
 
     // Story
-    var story = el('textarea', { rows: 12, value: lesson.story });
+    var story = el('textarea', { rows: 12, value: lesson.story, spellcheck: 'true', lang: 'he' });
     story.addEventListener('input', function () { lesson.story = H.normalize(story.value); changed(); });
     root.appendChild(el('div', { class: 'field' },
       el('label', null, 'הסיפור'),
@@ -450,7 +452,159 @@
     return box;
   }
 
-  /* ---------- Step 5: link ---------- */
+  /* ---------- Step 5: optional checks ---------- */
+
+  var RV = window.Review;
+  var nikud = { diffs: [], signature: null };
+
+  function resetCheckStep() {
+    $('reviewPromptBox').hidden = true;
+    $('reviewResponse').value = '';
+    $('dictaText').value = '';
+    U.clear($('reviewMsgs'));
+    U.clear($('reviewList'));
+    U.clear($('checkStepMsgs'));
+    clearNikudResults();
+  }
+
+  function clearNikudResults() {
+    nikud = { diffs: [], signature: null };
+    U.clear($('nikudMsgs'));
+    U.clear($('nikudList'));
+  }
+
+  // The nikud comparison is tied to the text it was made against.
+  function nikudIsStale() {
+    return nikud.signature !== null && nikud.signature !== RV.signature(state.lesson);
+  }
+
+  function dropStaleNikud() {
+    if (!nikudIsStale()) return;
+    clearNikudResults();
+    $('nikudMsgs').appendChild(msgBox('info', 'הטקסט השתנה מאז ההשוואה. כדי לבדוק שוב, העתיקו את הטקסט מחדש והשוו.'));
+  }
+
+  function enterCheckStep() {
+    U.clear($('checkStepMsgs'));
+    dropStaleNikud();
+  }
+
+  function goToLink() {
+    var res = L.check(state.lesson, state.request);
+    var msgs = U.clear($('checkStepMsgs'));
+    if (res.errors.length) {
+      msgs.appendChild(msgBox('error', 'אחרי השינויים צריך לתקן כמה דברים לפני יצירת קישור (בשלב העריכה):', res.errors));
+      return;
+    }
+    showStep(6);
+  }
+
+  /* 1. Text review */
+
+  function makeReviewPrompt() {
+    $('reviewPromptText').textContent = RV.buildReviewPrompt(state.lesson);
+    $('reviewPromptBox').hidden = false;
+  }
+
+  function parseReview() {
+    var msgs = U.clear($('reviewMsgs'));
+    var list = U.clear($('reviewList'));
+    var text = $('reviewResponse').value;
+    if (!text.trim()) { msgs.appendChild(msgBox('error', 'לא הודבקה תשובה.')); return; }
+    var r = RV.parseSuggestions(text);
+    if (r.error) { msgs.appendChild(msgBox('error', r.error, ['ודאו שהעתקתם את כל התשובה, או בקשו מהבינה להחזיר JSON בבלוק קוד.'])); return; }
+    if (!r.items.length) { msgs.appendChild(msgBox('ok', 'הבינה לא מצאה מה לתקן ✓')); return; }
+    msgs.appendChild(msgBox('info', 'נמצאו ' + r.items.length + ' הצעות. אשרו או דחו כל הצעה.'));
+    r.items.forEach(function (item) { list.appendChild(reviewCard(item)); });
+  }
+
+  function reviewCard(item) {
+    var loc = RV.locate(state.lesson, item);
+    var ownSlot = RV.slots(state.lesson, false).filter(function (s) { return s.key === item.field; })[0];
+    var label = loc ? loc.slot.label : ownSlot ? ownSlot.label : (item.field || 'שדה לא ידוע');
+    var status = el('span', { class: 'review-status' });
+    var actions = el('div', { class: 'row' });
+    var card = el('div', { class: 'review-item' },
+      el('div', { class: 'review-head' }, el('strong', null, label), status),
+      el('div', { class: 'review-diff' },
+        el('del', null, item.original), el('span', { class: 'muted', 'aria-hidden': 'true' }, ' ← '), el('ins', null, item.fix)),
+      item.reason ? el('p', { class: 'muted small' }, item.reason) : null,
+      actions);
+
+    var approve = el('button', { type: 'button', class: 'btn small primary' }, '✓ אשר');
+    var reject = el('button', { type: 'button', class: 'btn small quiet' }, '✕ דחה');
+    actions.appendChild(approve);
+    actions.appendChild(reject);
+
+    var warn = el('div', { class: 'msg warn small', hidden: true }, 'הטקסט המקורי לא נמצא בשיעור (אולי כבר תוקן, או שהבינה שינתה אותו). אפשר לתקן ידנית בשלב העריכה.');
+    card.insertBefore(warn, actions);
+    if (!loc) { warn.hidden = false; approve.disabled = true; }
+
+    function done(text, cls) {
+      status.textContent = text;
+      card.classList.add(cls);
+      actions.hidden = true;
+    }
+    approve.addEventListener('click', function () {
+      if (!RV.applySuggestion(state.lesson, item)) { warn.hidden = false; approve.disabled = true; return; }
+      done('אושר ✓', 'accepted');
+      changed();
+      dropStaleNikud();
+    });
+    reject.addEventListener('click', function () { done('נדחה', 'rejected'); });
+    return card;
+  }
+
+  /* 2. Nikud check */
+
+  function compareNikud() {
+    var msgs = U.clear($('nikudMsgs'));
+    var list = U.clear($('nikudList'));
+    nikud = { diffs: [], signature: null };
+    var r = RV.compareNikud(state.lesson, $('dictaText').value);
+    if (r.error) { msgs.appendChild(msgBox('error', r.error, r.details)); return; }
+    nikud = { diffs: r.diffs, signature: RV.signature(state.lesson) };
+    if (!r.diffs.length) { msgs.appendChild(msgBox('ok', 'הניקוד זהה לניקוד של דיקטה ✓')); return; }
+
+    msgs.appendChild(msgBox('info', 'נמצאו ' + r.diffs.length + ' מילים עם ניקוד שונה. בחרו לכל מילה את הגרסה הנכונה.'));
+    var acceptAll = el('button', { type: 'button', class: 'btn small' }, 'קבל את כל דיקטה');
+    list.appendChild(el('div', { class: 'row', style: 'margin-bottom:10px' }, acceptAll));
+    var rows = r.diffs.map(nikudRow);
+    rows.forEach(function (row) { list.appendChild(row.node); });
+    acceptAll.addEventListener('click', function () {
+      rows.forEach(function (row) { row.pick('dicta'); });
+    });
+  }
+
+  function nikudRow(d) {
+    var aiBtn = el('button', { type: 'button', class: 'pick' }, el('span', { class: 'pick-label' }, 'הבינה'), el('span', { class: 'pick-word' }, d.ai));
+    var dictaBtn = el('button', { type: 'button', class: 'pick' }, el('span', { class: 'pick-label' }, 'דיקטה'), el('span', { class: 'pick-word' }, d.dicta));
+    var node = el('div', { class: 'nikud-row' },
+      el('div', { class: 'nikud-context' },
+        el('span', { class: 'muted small' }, d.slot.label + ': '),
+        d.before ? H.stripNikud(d.before) + ' ' : '', el('mark', null, H.stripNikud(d.ai)), d.after ? ' ' + H.stripNikud(d.after) : ''),
+      el('div', { class: 'row' }, aiBtn, dictaBtn));
+
+    function show() {
+      aiBtn.classList.toggle('selected', d.choice === 'ai');
+      dictaBtn.classList.toggle('selected', d.choice === 'dicta');
+    }
+    function pick(choice) {
+      if (d.choice === choice) return;
+      if (nikudIsStale()) { dropStaleNikud(); return; }
+      if (!RV.setWord(d.slot, d.index, choice === 'ai' ? d.ai : d.dicta)) { toast('לא הצלחתי להחליף את המילה.'); return; }
+      d.choice = choice;
+      nikud.signature = RV.signature(state.lesson);
+      show();
+      changed();
+    }
+    aiBtn.addEventListener('click', function () { pick('ai'); });
+    dictaBtn.addEventListener('click', function () { pick('dicta'); });
+    show();
+    return { node: node, pick: pick };
+  }
+
+  /* ---------- Step 6: link ---------- */
 
   function renderLink() {
     var lesson = state.lesson;
@@ -489,6 +643,15 @@
       if (L.check(state.lesson, state.request).errors.length) return;
       showStep(5);
     });
+    $('skipCheck').addEventListener('click', goToLink);
+    $('toLink').addEventListener('click', goToLink);
+    $('makeReviewPrompt').addEventListener('click', makeReviewPrompt);
+    $('copyReviewPrompt').addEventListener('click', function () { copy($('reviewPromptText').textContent, 'הפרומפט הועתק! הדביקו בצ׳אט.'); });
+    $('parseReview').addEventListener('click', parseReview);
+    $('copyPlain').addEventListener('click', function () {
+      copy(RV.plainText(state.lesson), 'הטקסט הועתק בלי ניקוד. עכשיו הדביקו אותו בנקדן של דיקטה.');
+    });
+    $('compareNikud').addEventListener('click', compareNikud);
     $('copyLink').addEventListener('click', function () { copy(state.link, 'הקישור הועתק!'); });
     $('downloadJson').addEventListener('click', downloadJson);
     $('newLesson').addEventListener('click', function () {

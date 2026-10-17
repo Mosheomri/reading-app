@@ -22,7 +22,8 @@
       <li data-step="2">2. פרומפט</li>
       <li data-step="3">3. תשובה</li>
       <li data-step="4">4. עריכה</li>
-      <li data-step="5">5. קישור</li>
+      <li data-step="5">5. בדיקה</li>
+      <li data-step="6">6. קישור</li>
     </ol>
 
     <!-- Step 1: settings -->
@@ -144,15 +145,80 @@
             <div class="row" style="margin-top:16px">
               <button type="button" class="btn quiet" data-go="3">→ חזרה</button>
               <span class="grow"></span>
-              <button type="button" class="btn primary big" id="makeLink">יצירת קישור ←</button>
+              <button type="button" class="btn primary big" id="makeLink">המשך לבדיקה ←</button>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Step 5: link -->
+    <!-- Step 5: optional checks -->
     <section id="step5" class="card" hidden>
+      <div class="row">
+        <h2 class="grow" style="margin:0">בדיקה (לא חובה)</h2>
+        <button type="button" class="btn small quiet" id="skipCheck">דילוג ליצירת קישור ←</button>
+      </div>
+      <p class="muted" style="margin-top:8px">אפשר לבדוק את הטקסט ואת הניקוד לפני שיוצרים קישור, או לדלג על אחד החלקים או על שניהם.</p>
+
+      <div class="check-part">
+        <h3>1. בדיקת טקסט: איות, דקדוק וניסוח</h3>
+        <p class="small">💡 מומלץ להשתמש בבינה אחרת, או לפחות בצ׳אט חדש, כדי לקבל עין רעננה.</p>
+        <div class="row" style="margin-bottom:12px">
+          <button type="button" class="btn" id="makeReviewPrompt">יצירת פרומפט ביקורת</button>
+        </div>
+        <div id="reviewPromptBox" hidden>
+          <div class="row" style="margin-bottom:8px">
+            <button type="button" class="btn primary" id="copyReviewPrompt">📋 העתק</button>
+            <span class="muted small">הדביקו בצ׳אט ושלחו, ואז העתיקו את התשובה לכאן.</span>
+          </div>
+          <details>
+            <summary class="muted small" style="cursor:pointer;margin-bottom:8px">הצגת הפרומפט</summary>
+            <pre class="prompt" id="reviewPromptText"></pre>
+          </details>
+          <div class="field" style="margin-top:12px">
+            <label for="reviewResponse">התשובה של הבינה</label>
+            <textarea id="reviewResponse" rows="6" class="code" placeholder="[ ... ]"></textarea>
+          </div>
+          <div class="row" style="margin-bottom:12px">
+            <button type="button" class="btn" id="parseReview">הצגת ההצעות</button>
+          </div>
+        </div>
+        <div class="msgs" id="reviewMsgs"></div>
+        <div id="reviewList"></div>
+      </div>
+
+      <div class="check-part">
+        <h3>2. בדיקת ניקוד מול הנקדן של דיקטה</h3>
+        <ol class="small check-steps">
+          <li>
+            <button type="button" class="btn small" id="copyPlain">📋 העתק טקסט בלי ניקוד</button>
+          </li>
+          <li>
+            פתחו את <a href="https://nakdan.dicta.org.il" target="_blank" rel="noopener">הנקדן של דיקטה</a>,
+            הדביקו את הטקסט, לחצו על "נקד" והעתיקו את התוצאה.
+          </li>
+          <li>הדביקו כאן את הטקסט המנוקד:</li>
+        </ol>
+        <div class="field">
+          <textarea id="dictaText" rows="6" lang="he" placeholder="הטקסט המנוקד מדיקטה"></textarea>
+        </div>
+        <div class="row" style="margin-bottom:12px">
+          <button type="button" class="btn" id="compareNikud">השוואה</button>
+        </div>
+        <div class="msgs" id="nikudMsgs"></div>
+        <div id="nikudList"></div>
+      </div>
+
+      <div class="msgs" id="checkStepMsgs"></div>
+      <div class="row" style="margin-top:16px">
+        <button type="button" class="btn quiet" data-go="4">→ חזרה לעריכה</button>
+        <span class="grow"></span>
+        <button type="button" class="btn primary big" id="toLink">יצירת קישור ←</button>
+      </div>
+    </section>
+
+    <!-- Step 6: link -->
+    <section id="step6" class="card" hidden>
       <h2>🎉 הקישור מוכן</h2>
       <p>שלחו את הקישור לילד. השיעור כולו נמצא בתוך הקישור עצמו.</p>
       <div class="link-box" id="linkBox"></div>
@@ -168,7 +234,7 @@
         <button type="button" class="btn" id="downloadJson">⬇️ הורדת קובץ שיעור</button>
       </div>
       <div class="row">
-        <button type="button" class="btn quiet" data-go="4">→ חזרה לעריכה</button>
+        <button type="button" class="btn quiet" data-go="5">→ חזרה</button>
         <span class="grow"></span>
         <button type="button" class="btn quiet" id="newLesson">שיעור חדש</button>
       </div>
@@ -181,6 +247,7 @@
   <script src="js/lesson.js"></script>
   <script src="js/render.js"></script>
   <script src="js/prompt.js"></script>
+  <script src="js/review.js"></script>
   <script src="js/builder.js"></script>
 </body>
 </html>
