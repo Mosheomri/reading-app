@@ -56,9 +56,10 @@
       '- אל תשכתב את הסיפור כולו. הצע רק תיקונים נקודתיים: כל תיקון הוא מילה אחת או כמה מילים.',
       '- שמור על שפה פשוטה וקצרה שמתאימה לילדים.',
       '- אין צורך לבדוק ניקוד, הוא נבדק בנפרד.',
+      '- בדוק שכל מילה כתובה בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר). כל מילה בכתיב חסר היא הצעה מסוג error, עם reason "כתיב חסר".',
       '- בשדה field כתוב את שם השדה מהרשימה, למשל "story" או "exercises[2].question".',
-      '- בשדה original העתק את הקטע בדיוק כפי שהוא מופיע בטקסט, כולל הניקוד.',
-      '- בשדה fix כתוב את הקטע המתוקן, בניקוד מלא.',
+      '- בשדה original העתק את הקטע כפי שהוא מופיע בטקסט (אפשר עם ניקוד או בלי).',
+      '- בשדה fix כתוב את הקטע המתוקן (רצוי בניקוד מלא).',
       '- בשדה reason כתוב הסבר קצר בעברית.',
       '- בשדה type כתוב "error" אם זו שגיאה (איות או דקדוק), או "style" אם זו הצעת ניסוח.',
       '- אם אין מה לתקן, החזר רשימה ריקה: [].',
@@ -119,13 +120,23 @@
     return { items: items };
   }
 
-  // Find `needle` in `text`: exactly, or else ignoring nikud. Returns {start, end} or null.
+  var LETTER_RE = /[\p{L}\p{N}]/u;
+
+  // Is stripped[k .. k+len) a whole word, or a word after a prefix (בַּבֹּקֶר for בקר)?
+  function atWordBoundary(stripped, k, len) {
+    if (k + len < stripped.length && LETTER_RE.test(stripped.charAt(k + len))) return false;
+    var p = k;
+    while (p > 0 && LETTER_RE.test(stripped.charAt(p - 1))) p--;
+    return p === k || /^[ושהבכלמ]{1,3}$/.test(stripped.slice(p, k));
+  }
+
+  // Find `needle` in `text` as whole word(s), ignoring nikud (a prefix before it is allowed).
+  // Prefers an occurrence whose nikud also matches. Returns {start, end} or null.
   function findLoose(text, needle) {
     text = H.normalize(text);
     needle = H.normalize(needle);
-    if (!needle) return null;
-    var idx = text.indexOf(needle);
-    if (idx !== -1) return { start: idx, end: idx + needle.length };
+    var n = H.stripNikud(needle);
+    if (!n) return null;
 
     var stripped = '';
     var map = [];
@@ -134,14 +145,18 @@
       stripped += text[i];
       map.push(i);
     }
-    var n = H.stripNikud(needle);
-    if (!n) return null;
-    var k = stripped.indexOf(n);
-    if (k === -1) return null;
-    var start = map[k];
-    var end = map[k + n.length - 1] + 1;
-    while (end < text.length && H.hasNikud(text[end])) end++;
-    return { start: start, end: end };
+
+    var first = null;
+    for (var k = stripped.indexOf(n); k !== -1; k = stripped.indexOf(n, k + 1)) {
+      if (!atWordBoundary(stripped, k, n.length)) continue;
+      var start = map[k];
+      var end = map[k + n.length - 1] + 1;
+      while (end < text.length && H.hasNikud(text[end])) end++;
+      var range = { start: start, end: end };
+      if (text.slice(start, end) === needle) return range;
+      if (!first) first = range;
+    }
+    return first;
   }
 
   // Where a suggestion applies now: its own field first, then any field. Returns {slot, start, end} or null.

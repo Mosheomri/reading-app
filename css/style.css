@@ -498,3 +498,4 @@ body.play .wrap { max-width: 900px; padding-top: 0; }
 .review-item.error .kind { background: var(--bad-soft); color: var(--bad); }
 .review-item.style .kind { background: #e7e5e2; color: #55595e; }
 .review-item.accepted { border-color: var(--good); background: var(--good-soft); }
+.fix-note { color: #2a5870; margin: 0 0 8px; }

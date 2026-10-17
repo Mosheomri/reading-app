@@ -534,6 +534,10 @@
       el('div', { class: 'review-diff' },
         el('del', null, item.original), el('span', { class: 'muted', 'aria-hidden': 'true' }, ' ← '), el('ins', null, item.fix)),
       item.reason ? el('p', { class: 'muted small' }, item.reason) : null,
+      // A fix without nikud replaces vocalized text with plain letters.
+      loc && !H.hasNikud(item.fix) && H.hasNikud(loc.slot.get().slice(loc.start, loc.end))
+        ? el('p', { class: 'small fix-note' }, 'ℹ️ התיקון בלי ניקוד. אחרי האישור כדאי לנקד אותו בעריכה, או בבדיקת הניקוד מול דיקטה שבהמשך.')
+        : null,
       actions);
 
     var approve = el('button', { type: 'button', class: 'btn small primary' }, '✓ אשר');
