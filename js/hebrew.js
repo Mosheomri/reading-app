@@ -41,23 +41,65 @@
     return stripNikud(s).replace(/[^\p{L}\p{N}]/gu, '');
   }
 
-  function matchesWord(token, target) {
+  /* ---------- Word matching ---------- */
+
+  var DAGESH = '\u05BC';
+  var SHEVA = '\u05B0';
+  // Cantillation and meteg never distinguish words for a young reader.
+  var IGNORED_MARKS_RE = /[\u0591-\u05AF\u05BD]/g;
+
+  // Letter clusters (letter + its marks), one per bare letter.
+  function letterClusters(word) {
+    return graphemes(word).filter(function (c) { return /[\p{L}\p{N}]/u.test(c.charAt(0)); });
+  }
+
+  // The marks of a cluster as a comparable key.
+  // first: the word's first letter, where a prefix changes the nikud
+  // (dagesh after ה הידיעה, dagesh kal dropped after ו/ב/כ/ל, sheva dropped as in וִילָדִים).
+  function marksKey(cluster, first, hasPrefix) {
+    var marks = cluster.slice(1).replace(/[^\p{M}]/gu, '').replace(IGNORED_MARKS_RE, '')
+      .replace(/\u05BA/g, '\u05B9'); // holam haser for vav = holam
+    if (first) marks = marks.split(DAGESH).join('');
+    if (first && hasPrefix) marks = marks.split(SHEVA).join('');
+    return marks.split('').sort().join('');
+  }
+
+  // Same nikud on the part of token that corresponds to target (after prefixLen letters).
+  function sameNikud(token, target, prefixLen) {
+    var tc = letterClusters(token).slice(prefixLen);
+    var wc = letterClusters(target);
+    if (tc.length !== wc.length) return false;
+    for (var i = 0; i < wc.length; i++) {
+      if (marksKey(tc[i], i === 0, prefixLen > 0) !== marksKey(wc[i], i === 0, prefixLen > 0)) return false;
+    }
+    return true;
+  }
+
+  // Number of prefix letters if bare letters `t` are `w` with an allowed prefix, else -1.
+  function prefixLength(t, w) {
+    if (t === w) return 0;
+    if (t.length > w.length && t.slice(-w.length) === w && PREFIX_RE.test(t.slice(0, t.length - w.length))) {
+      return t.length - w.length;
+    }
+    return -1;
+  }
+
+  // Does a story token match a target word (allowing prefixes)?
+  // When both are vocalized the nikud must match too; ignoreNikud compares letters only.
+  function matchesWord(token, target, ignoreNikud) {
     var t = bare(token);
     var w = bare(target);
     if (!t || !w) return false;
-    if (t === w) return true;
-    if (t.length > w.length && t.slice(-w.length) === w &&
-        PREFIX_RE.test(t.slice(0, t.length - w.length))) {
-      return true;
-    }
+    var forms = [{ letters: w, word: target }];
     // Target given with the article: בגינה / לגינה should match הגינה.
     if (w.charAt(0) === 'ה' && w.length > 2) {
-      var rest = w.slice(1);
-      if (t === rest) return true;
-      if (t.length > rest.length && t.slice(-rest.length) === rest &&
-          PREFIX_RE.test(t.slice(0, t.length - rest.length))) {
-        return true;
-      }
+      forms.push({ letters: w.slice(1), word: letterClusters(target).slice(1).join('') });
+    }
+    var checkNikud = !ignoreNikud && hasNikud(token) && hasNikud(target);
+    for (var i = 0; i < forms.length; i++) {
+      var p = prefixLength(t, forms[i].letters);
+      if (p === -1) continue;
+      if (!checkNikud || sameNikud(token, forms[i].word, p)) return true;
     }
     return false;
   }

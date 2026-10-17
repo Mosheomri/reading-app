@@ -282,7 +282,16 @@
       return t && !storyWords.some(function (w) { return H.matchesWord(w, t); });
     });
     missingWords.forEach(function (t) {
-      errors.push('מילת היעד "' + t + '" לא מופיעה בסיפור.');
+      // Same letters, different nikud: say so, it is usually a vocalization slip.
+      var seen = {};
+      var variants = storyWords.filter(function (w) {
+        if (seen[w] || !H.matchesWord(w, t, true)) return false;
+        seen[w] = true;
+        return true;
+      });
+      errors.push(variants.length
+        ? 'מילת היעד "' + t + '" מופיעה בסיפור רק בניקוד אחר: ' + variants.slice(0, 3).join(', ') + '.'
+        : 'מילת היעד "' + t + '" לא מופיעה בסיפור.');
     });
 
     var unvocalized = lesson.nikudMode === 'full' ? unvocalizedWords(lesson) : [];
