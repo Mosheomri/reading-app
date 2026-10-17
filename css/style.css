@@ -432,3 +432,12 @@ body.play .wrap { max-width: 900px; padding-top: 0; }
 }
 
 .center-msg { text-align: center; padding: 48px 16px; }
+
+/* Teacher preview: Hebrew word with no nikud in full-nikud mode */
+.no-nikud,
+.story .word.no-nikud {
+  background: var(--bad-soft);
+  box-shadow: inset 0 -3px 0 var(--bad);
+  border-radius: 4px;
+  padding: 0 2px;
+}

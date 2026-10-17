@@ -21,6 +21,21 @@
     return normalize(s).replace(MARKS_RE, '');
   }
 
+  var HAS_MARK_RE = new RegExp(MARKS_RE.source);
+
+  function hasNikud(s) {
+    return HAS_MARK_RE.test(s);
+  }
+
+  function isHebrew(s) {
+    return /[א-ת]/.test(s);
+  }
+
+  // A Hebrew word that has no nikud mark at all.
+  function isUnvocalized(word) {
+    return isHebrew(word) && !hasNikud(word);
+  }
+
   // Bare letters only, for word comparison.
   function bare(s) {
     return stripNikud(s).replace(/[^\p{L}\p{N}]/gu, '');
@@ -96,6 +111,9 @@
   window.Hebrew = {
     normalize: normalize,
     stripNikud: stripNikud,
+    hasNikud: hasNikud,
+    isHebrew: isHebrew,
+    isUnvocalized: isUnvocalized,
     bare: bare,
     matchesWord: matchesWord,
     matchesAny: matchesAny,

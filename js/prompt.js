@@ -21,13 +21,26 @@
     ]
   };
 
+  // AIs follow paragraph/sentence counts better than word counts.
+  var WORDS_PER_SENTENCE = 8;
+  var SENTENCES_PER_PARAGRAPH = 4;
+
+  // e.g. 128 words → "4 פסקאות, בכל פסקה 4 משפטים קצרים"
+  function storyShape(length) {
+    var sentences = Math.max(2, Math.round(length / WORDS_PER_SENTENCE));
+    var paragraphs = Math.max(1, Math.round(sentences / SENTENCES_PER_PARAGRAPH));
+    var perParagraph = Math.max(1, Math.round(sentences / paragraphs));
+    if (paragraphs === 1) return 'פסקה אחת, עם ' + perParagraph + ' משפטים קצרים';
+    return paragraphs + ' פסקאות, בכל פסקה ' + perParagraph + ' משפטים קצרים';
+  }
+
   // settings: {topic, length, wordsMode: 'number'|'list', wordCount, words: []}
   function buildPrompt(settings) {
     var lines = [
       'אתה כותב תוכן ללימוד קריאה לילד בהוראה מותאמת.',
       '',
       'כתוב סיפור קצר בעברית בנושא: ' + settings.topic,
-      'אורך הסיפור: בערך ' + settings.length + ' מילים.'
+      'אורך הסיפור: ' + storyShape(settings.length) + '.'
     ];
     if (settings.wordsMode === 'list') {
       lines.push('מילות היעד: ' + settings.words.join(', ') + '. כל מילת יעד חייבת להופיע בסיפור לפחות פעמיים.');
@@ -57,4 +70,5 @@
   }
 
   window.buildPrompt = buildPrompt;
+  window.storyShape = storyShape;
 })();

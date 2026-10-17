@@ -176,9 +176,10 @@
       lesson.nikudMode = state.settings.nikud;
       if (!lesson.topic) lesson.topic = state.settings.topic;
     }
+    // Automatic fixes are shown as warnings but not sent back to the AI.
+    var notes = c.notes.concat(L.sortOrderExercises(lesson));
     var res = L.check(lesson, state.request);
-    // Automatic fixes (c.notes) are shown as warnings but not sent back to the AI.
-    var warnings = c.notes.concat(res.warnings);
+    var warnings = notes.concat(res.warnings);
     if (!res.errors.length && !warnings.length) {
       acceptLesson(lesson, state.request);
       return;
@@ -412,11 +413,11 @@
     $('makeLink').disabled = res.errors.length > 0;
 
     var p = U.clear($('preview'));
-    p.appendChild(el('h2', { style: 'text-align:center' }, R.text(lesson, lesson.title)));
+    p.appendChild(el('h2', { style: 'text-align:center' }, R.markedText(lesson, lesson.title)));
     p.appendChild(el('div', { class: 'target-chips' }, lesson.targetWords.map(function (t) {
-      return el('span', { class: 'chip' }, t.emoji + ' ' + R.text(lesson, t.word));
+      return el('span', { class: 'chip' }, t.emoji + ' ', R.markedText(lesson, t.word));
     })));
-    p.appendChild(el('div', { class: 'story' }, R.story(lesson)));
+    p.appendChild(el('div', { class: 'story' }, R.story(lesson, null, true)));
     p.appendChild(el('h3', { style: 'margin-top:16px' }, 'תרגילים'));
     lesson.exercises.forEach(function (ex, i) {
       if (ex.unknown) return;
@@ -427,23 +428,24 @@
   function exercisePreview(lesson, ex, i) {
     var box = el('div', { class: 'ex-preview' });
     var num = (i + 1) + '. ';
+    function t(s) { return R.markedText(lesson, s); }
     function optionList() {
       return el('ol', null, ex.options.map(function (o, j) {
-        return el('li', { class: j === ex.answer ? 'correct' : '' }, R.text(lesson, o) + (j === ex.answer ? ' ✓' : ''));
+        return el('li', { class: j === ex.answer ? 'correct' : '' }, t(o), j === ex.answer ? ' ✓' : '');
       }));
     }
     if (ex.type === 'mcq') {
-      box.appendChild(el('div', null, num + R.text(lesson, ex.question)));
+      box.appendChild(el('div', null, num, t(ex.question)));
       box.appendChild(optionList());
     } else if (ex.type === 'tf') {
-      box.appendChild(el('div', null, num + R.text(lesson, ex.statement)));
+      box.appendChild(el('div', null, num, t(ex.statement)));
       box.appendChild(el('div', { class: 'correct' }, ex.answer === true ? 'נכון ✓' : ex.answer === false ? 'לא נכון ✓' : ''));
     } else if (ex.type === 'fill') {
-      box.appendChild(el('div', null, num, R.fillSentence(lesson, ex.sentence)));
+      box.appendChild(el('div', null, num, R.fillSentence(lesson, ex.sentence, null, true)));
       box.appendChild(optionList());
     } else if (ex.type === 'order') {
       box.appendChild(el('div', null, num + 'סידור משפטים (הילד יקבל אותם מעורבבים):'));
-      box.appendChild(el('ol', null, ex.sentences.map(function (s) { return el('li', null, R.text(lesson, s)); })));
+      box.appendChild(el('ol', null, ex.sentences.map(function (s) { return el('li', null, t(s)); })));
     }
     return box;
   }

@@ -82,7 +82,10 @@
           answer: toIndex(raw.answer, options)
         };
       case 'order':
-        return { type: 'order', sentences: strList(raw.sentences || raw.items) };
+        // Drop numbering some AIs add ("1. ...").
+        return { type: 'order', sentences: strList(raw.sentences || raw.items).map(function (s) {
+          return s.replace(/^\d+[.)]\s*/, '');
+        }) };
       default:
         return { type: String(raw.type || ''), unknown: true };
     }
@@ -161,8 +164,78 @@
     }
   }
 
+  /* ---------- Sentences in the story ---------- */
+
+  // Words without nikud or punctuation, for comparing a sentence with the story.
+  function bareWords(text) {
+    return H.tokenize(text)
+      .filter(function (s) { return s.isWord; })
+      .map(function (s) { return H.bare(s.text); })
+      .filter(Boolean);
+  }
+
+  // Word index where the sentence starts in the story, or -1.
+  function findSentence(storyWords, sentence) {
+    var sw = bareWords(sentence);
+    if (!sw.length) return -1;
+    outer:
+    for (var i = 0; i + sw.length <= storyWords.length; i++) {
+      for (var j = 0; j < sw.length; j++) {
+        if (storyWords[i + j] !== sw[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  // Sort each order exercise by where its sentences appear in the story.
+  // Sentences not found keep their slot. Returns notes about changes made.
+  function sortOrderExercises(lesson) {
+    var notes = [];
+    var storyWords = bareWords(lesson.story);
+    lesson.exercises.forEach(function (ex, i) {
+      if (ex.type !== 'order') return;
+      var found = [];
+      ex.sentences.forEach(function (s, slot) {
+        var pos = findSentence(storyWords, s);
+        if (pos !== -1) found.push({ slot: slot, pos: pos, text: s });
+      });
+      var sorted = found.slice().sort(function (a, b) { return a.pos - b.pos || a.slot - b.slot; });
+      var changed = false;
+      found.forEach(function (f, k) {
+        if (sorted[k].text !== f.text) changed = true;
+        ex.sentences[f.slot] = sorted[k].text;
+      });
+      if (changed) notes.push(exLabel(i, ex) + ': סדר המשפטים תוקן לפי הסדר בסיפור.');
+    });
+    return notes;
+  }
+
+  // Unique Hebrew words with no nikud, across all lesson text.
+  function unvocalizedWords(lesson) {
+    var texts = [lesson.title, lesson.story];
+    lesson.targetWords.forEach(function (t) { texts.push(t.word); });
+    lesson.exercises.forEach(function (ex) {
+      if (ex.unknown) return;
+      texts.push(ex.question, ex.statement, ex.sentence);
+      texts = texts.concat(ex.options || [], ex.sentences || []);
+    });
+    var seen = {};
+    var out = [];
+    texts.forEach(function (t) {
+      if (!t) return;
+      H.tokenize(t).forEach(function (seg) {
+        if (seg.isWord && H.isUnvocalized(seg.text) && !seen[seg.text]) {
+          seen[seg.text] = true;
+          out.push(seg.text);
+        }
+      });
+    });
+    return out;
+  }
+
   // request (optional): {length: number, wordsMode: 'number'|'list', wordCount: n, words: [..]}
-  // Returns {errors, warnings, wordCount, missingWords}.
+  // Returns {errors, warnings, wordCount, missingWords, unvocalized}.
   function check(lesson, request) {
     var errors = [];
     var warnings = [];
@@ -212,6 +285,14 @@
       errors.push('מילת היעד "' + t + '" לא מופיעה בסיפור.');
     });
 
+    var unvocalized = lesson.nikudMode === 'full' ? unvocalizedWords(lesson) : [];
+    if (unvocalized.length) {
+      var shown = unvocalized.slice(0, 15).join(', ');
+      warnings.push('מילים בלי ניקוד (מסומנות באדום בתצוגה): ' + shown +
+        (unvocalized.length > 15 ? ' ועוד ' + (unvocalized.length - 15) : '') + '.');
+    }
+
+    var storyBare = bareWords(lesson.story);
     if (!lesson.exercises.length) errors.push('אין תרגילים.');
     lesson.exercises.forEach(function (ex, i) {
       var label = exLabel(i, ex);
@@ -229,10 +310,13 @@
       } else if (ex.type === 'order') {
         if (ex.sentences.length < 2) errors.push(label + ': צריך לפחות 2 משפטים.');
         if (ex.sentences.some(function (s) { return !s; })) errors.push(label + ': יש משפט ריק.');
+        ex.sentences.forEach(function (s) {
+          if (s && findSentence(storyBare, s) === -1) warnings.push(label + ': המשפט "' + s + '" לא נמצא בסיפור.');
+        });
       }
     });
 
-    return { errors: errors, warnings: warnings, wordCount: wordCount, missingWords: missingWords };
+    return { errors: errors, warnings: warnings, wordCount: wordCount, missingWords: missingWords, unvocalized: unvocalized };
   }
 
   // A short message the teacher can send back to her AI.
@@ -279,6 +363,7 @@
     extractJson: extractJson,
     coerce: coerce,
     check: check,
+    sortOrderExercises: sortOrderExercises,
     fixMessage: fixMessage,
     clean: clean,
     encode: encode,
