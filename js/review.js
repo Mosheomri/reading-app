@@ -47,7 +47,11 @@
 
   function buildReviewPrompt(lesson) {
     var texts = {};
-    slots(lesson, false).forEach(function (s) { if (s.get()) texts[s.key] = s.get(); });
+    // Without nikud, so defective spelling stands out (ששי, בקר).
+    slots(lesson, false).forEach(function (s) {
+      var t = H.stripNikud(s.get()).trim();
+      if (t) texts[s.key] = t;
+    });
     return [
       'אתה עורך לשון שבודק תוכן לימודי לילדים בעברית.',
       'בדוק את הטקסטים שלמטה (כותרת, סיפור ותרגילים): איות, דקדוק וניסוח.',
@@ -55,11 +59,11 @@
       'הנחיות:',
       '- אל תשכתב את הסיפור כולו. הצע רק תיקונים נקודתיים: כל תיקון הוא מילה אחת או כמה מילים.',
       '- שמור על שפה פשוטה וקצרה שמתאימה לילדים.',
-      '- אין צורך לבדוק ניקוד, הוא נבדק בנפרד.',
+      '- הטקסטים נשלחים בלי ניקוד. אל תוסיף ניקוד, הוא נבדק בנפרד.',
       '- בדוק שכל מילה כתובה בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר). כל מילה בכתיב חסר היא הצעה מסוג error, עם reason "כתיב חסר".',
       '- בשדה field כתוב את שם השדה מהרשימה, למשל "story" או "exercises[2].question".',
-      '- בשדה original העתק את הקטע כפי שהוא מופיע בטקסט (אפשר עם ניקוד או בלי).',
-      '- בשדה fix כתוב את הקטע המתוקן (רצוי בניקוד מלא).',
+      '- בשדה original העתק את הקטע בדיוק כפי שהוא מופיע בטקסט.',
+      '- בשדה fix כתוב את הקטע המתוקן, בלי ניקוד.',
       '- בשדה reason כתוב הסבר קצר בעברית.',
       '- בשדה type כתוב "error" אם זו שגיאה (איות או דקדוק), או "style" אם זו הצעת ניסוח.',
       '- אם אין מה לתקן, החזר רשימה ריקה: [].',
@@ -180,6 +184,48 @@
     return true;
   }
 
+  /* ---------- Defective spelling (ktiv haser) ---------- */
+
+  var HOLAM = String.fromCharCode(0x05B9);
+  var QUBUTS = String.fromCharCode(0x05BB);
+  // Words spelled with holam haser even in ktiv male (holam before א, as in לֹא, is allowed by the rule itself).
+  var HASER_OK = ['פה', 'כה', 'איפה', 'משה'];
+
+  function isHaserException(word) {
+    var b = H.bare(word);
+    return HASER_OK.some(function (w) {
+      return b === w || (b.length > w.length && b.slice(-w.length) === w && /^[ושהבכלמ]{1,3}$/.test(b.slice(0, b.length - w.length)));
+    });
+  }
+
+  // A holam or qubuts on a letter other than ו with no ו or א after it: בֹּקֶר, שֻׁלְחָן, אֹכֶל (but not רֹאשׁ).
+  function looksHaser(word) {
+    var letters = H.graphemes(word).filter(function (c) { return /\p{L}/u.test(c.charAt(0)); });
+    for (var i = 0; i < letters.length; i++) {
+      var c = letters[i];
+      var letter = c.charAt(0);
+      if (letter === 'ו' || (c.indexOf(HOLAM) === -1 && c.indexOf(QUBUTS) === -1)) continue;
+      var next = letters[i + 1];
+      if (next && (next.charAt(0) === 'ו' || next.charAt(0) === 'א')) continue;
+      return true;
+    }
+    return false;
+  }
+
+  // Distinct words in the lesson that may be in defective spelling.
+  function haserWords(lesson) {
+    var seen = {};
+    var out = [];
+    slots(lesson, true).forEach(function (s) {
+      words(s.get()).forEach(function (w) {
+        if (seen[w] || !looksHaser(w) || isHaserException(w)) return;
+        seen[w] = true;
+        out.push(w);
+      });
+    });
+    return out;
+  }
+
   /* ---------- 2. Nikud check against Dicta ---------- */
 
   // All lesson text without nikud, one field per line (the story keeps its paragraphs).
@@ -291,6 +337,7 @@
     applySuggestion: applySuggestion,
     plainText: plainText,
     compareNikud: compareNikud,
+    haserWords: haserWords,
     setWord: setWord
   };
 })();

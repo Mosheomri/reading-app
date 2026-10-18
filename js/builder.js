@@ -411,8 +411,12 @@
     var msgs = U.clear($('checkMsgs'));
     if (res.errors.length) msgs.appendChild(msgBox('error', 'צריך לתקן לפני יצירת קישור:', res.errors));
     if (res.warnings.length) msgs.appendChild(msgBox('warn', 'שימו לב:', res.warnings));
-    if (!res.errors.length && !res.warnings.length) msgs.appendChild(msgBox('ok', 'הכל תקין ✓'));
+    var haser = haserBox();
+    if (haser) msgs.appendChild(haser);
+    if (!res.errors.length && !res.warnings.length && !haser) msgs.appendChild(msgBox('ok', 'הכל תקין ✓'));
     $('makeLink').disabled = res.errors.length > 0;
+    var stepMsgs = U.clear($('haserMsgs'));
+    if (haser) stepMsgs.appendChild(haserBox());
 
     var p = U.clear($('preview'));
     p.appendChild(el('h2', { style: 'text-align:center' }, R.markedText(lesson, lesson.title)));
@@ -425,6 +429,12 @@
       if (ex.unknown) return;
       p.appendChild(exercisePreview(lesson, ex, i));
     });
+  }
+
+  // Not blocking: holam/qubuts without ו may be fine (כֹּל), so the teacher decides.
+  function haserBox() {
+    var list = window.Review.haserWords(state.lesson);
+    return list.length ? msgBox('warn', 'ייתכן כתיב חסר (חולם או קובוץ בלי ו):', [list.join(', ')]) : null;
   }
 
   function exercisePreview(lesson, ex, i) {

@@ -25,13 +25,14 @@
   var WORDS_PER_SENTENCE = 8;
   var SENTENCES_PER_PARAGRAPH = 4;
 
-  // e.g. 128 words → "4 פסקאות, בכל פסקה 4 משפטים קצרים"
+  // e.g. 128 words → "4 פסקאות, בכל פסקה 4 משפטים קצרים, סך הכול בערך 128 מילים"
   function storyShape(length) {
     var sentences = Math.max(2, Math.round(length / WORDS_PER_SENTENCE));
     var paragraphs = Math.max(1, Math.round(sentences / SENTENCES_PER_PARAGRAPH));
     var perParagraph = Math.max(1, Math.round(sentences / paragraphs));
-    if (paragraphs === 1) return 'פסקה אחת, עם ' + perParagraph + ' משפטים קצרים';
-    return paragraphs + ' פסקאות, בכל פסקה ' + perParagraph + ' משפטים קצרים';
+    var total = ', סך הכול בערך ' + length + ' מילים';
+    if (paragraphs === 1) return 'פסקה אחת, עם ' + perParagraph + ' משפטים קצרים' + total;
+    return paragraphs + ' פסקאות, בכל פסקה ' + perParagraph + ' משפטים קצרים' + total;
   }
 
   // settings: {topic, length, wordsMode: 'number'|'list', wordCount, words: []}
