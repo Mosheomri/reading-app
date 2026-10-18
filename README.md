@@ -71,9 +71,12 @@ js/render.js          תצוגת טקסט משותפת למורה ולילד
 js/review.js          שלב הבדיקה: ביקורת טקסט והשוואת ניקוד מול דיקטה
 js/util.js            עזרים: DOM, העתקה, הקראה
 js/lz-string.min.js   LZ-String 1.5.0 (רישיון MIT)
+tests/                בדיקות אוטומטיות (Playwright בפייתון)
 ```
 
 **הרצה מקומית:** מריצים `python -m http.server` בתיקיית הפרויקט וגולשים אל `http://localhost:8000`.
+
+**בדיקות:** מתקינים פעם אחת `pip install playwright` (נדרש גם Google Chrome), ומריצים `python tests/run_all.py` מתיקיית הפרויקט. צילומי מסך נשמרים ב-`tests/out/`.
 
 **פרסום ב-GitHub Pages:** מעלים את התיקייה למאגר, ובהגדרות המאגר בוחרים *Pages*, ואז *Deploy from a branch* ואת הענף הראשי עם התיקייה `/`.
 
