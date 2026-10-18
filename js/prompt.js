@@ -2,22 +2,21 @@
 (function () {
   'use strict';
 
-  // Schema example shown to the AI (section 5), nikudMode always "full":
-  // nikud display is applied by the app at render time.
+  // Schema example shown to the AI (section 5). No nikud and no nikudMode:
+  // the teacher adds nikud with Dicta, and the display mode is chosen in the app.
   var SCHEMA_EXAMPLE = {
     version: 1,
-    title: 'כּוֹתֶרֶת מְנֻקֶּדֶת',
-    topic: 'הַנּוֹשֵׂא',
-    nikudMode: 'full',
+    title: 'כותרת',
+    topic: 'הנושא',
     targetWords: [
-      { word: 'מִלָּה מְנֻקֶּדֶת', emoji: '🙂' }
+      { word: 'מילה', emoji: '🙂' }
     ],
-    story: 'הַסִּפּוּר הַמָּלֵא בְּנִקּוּד מָלֵא.\nפִּסְקָה חֲדָשָׁה אַחֲרֵי שׁוּרָה חֲדָשָׁה.',
+    story: 'הסיפור המלא.\nפסקה חדשה אחרי שורה חדשה.',
     exercises: [
-      { type: 'mcq', question: 'שְׁאֵלָה?', options: ['אֶפְשָׁרוּת א', 'אֶפְשָׁרוּת ב', 'אֶפְשָׁרוּת ג'], answer: 0 },
-      { type: 'tf', statement: 'מִשְׁפָּט עַל הַסִּפּוּר.', answer: true },
-      { type: 'fill', sentence: 'מִשְׁפָּט עִם ___ חֲסֵרָה.', options: ['מִלָּה', 'אַחֶרֶת', 'שְׁלִישִׁית'], answer: 0 },
-      { type: 'order', sentences: ['מִשְׁפָּט רִאשׁוֹן', 'מִשְׁפָּט שֵׁנִי', 'מִשְׁפָּט שְׁלִישִׁי', 'מִשְׁפָּט רְבִיעִי'] }
+      { type: 'mcq', question: 'שאלה?', options: ['אפשרות א', 'אפשרות ב', 'אפשרות ג'], answer: 0 },
+      { type: 'tf', statement: 'משפט על הסיפור.', answer: true },
+      { type: 'fill', sentence: 'משפט עם ___ חסרה.', options: ['מילה', 'אחרת', 'שלישית'], answer: 0 },
+      { type: 'order', sentences: ['משפט ראשון', 'משפט שני', 'משפט שלישי', 'משפט רביעי'] }
     ]
   };
 
@@ -52,9 +51,8 @@
       '',
       'הנחיות לסיפור:',
       '- משפטים קצרים ופשוטים, שפה של ילדים.',
-      '- כתוב את כל הטקסט בניקוד מלא ומדויק: הכותרת, הסיפור, המילים, השאלות והתשובות.',
-      '- כתוב בכתיב מלא (כמו טקסט רגיל בלי ניקוד), ועליו הוסף ניקוד מלא.',
-      '- גם מילות היעד בשדה word חייבות להיות בניקוד מלא.',
+      '- כתוב את כל הטקסט בלי ניקוד בכלל: הכותרת, הסיפור, המילים, השאלות והתשובות.',
+      '- כתוב בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר).',
       '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה.',
       '- אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד.',
       '',

@@ -66,7 +66,7 @@ with sync_playwright() as p:
     page.click("button[type=submit]")
     prompt = page.text_content("#promptText")
     check(page.is_visible("#step2") and "כלב בגינה" in prompt and "מילות היעד: כלב, כדור, גינה, עץ" in prompt, "prompt generated")
-    check('"nikudMode": "full"' in prompt, "prompt schema has nikudMode full")
+    check('nikudMode' not in prompt and not page.evaluate("(p) => Hebrew.hasNikud(p)", prompt), "prompt and schema without nikud or nikudMode")
     page.screenshot(path=os.path.join(OUT, "t2-prompt.png"), full_page=True)
 
     page.click("#step2 [data-go='3']")
@@ -105,7 +105,14 @@ with sync_playwright() as p:
     page.screenshot(path=os.path.join(OUT, "t4-editor-desktop.png"))
     page.set_viewport_size({"width": 390, "height": 844})
 
+    # Partial nikud: Dicta is required before the link
     page.click("#makeLink"); page.click("#toLink")
+    check(page.is_visible("#step5") and "לנקד את הטקסט בדיקטה" in page.text_content("#checkStepMsgs"), "partial mode: link blocked until Dicta")
+    voc = page.evaluate("""() => Review.slots(JSON.parse(localStorage.getItem('readingApp.draft')).lesson, true)
+                                  .map(s => s.get().trim()).filter(Boolean).join('\\n')""")
+    page.fill("#dictaText", voc)
+    page.click("#compareNikud")
+    page.click("#toLink")
     link = page.text_content("#linkBox")
     check(link.startswith(BASE + "play.html#"), "link built: %d chars" % len(link))
     wa = page.get_attribute("#waLink", "href")

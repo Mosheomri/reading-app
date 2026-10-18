@@ -33,8 +33,9 @@ with sync_playwright() as p:
     prompt = page.text_content("#promptText")
     check("בתוך בלוק קוד אחד (```json)" in prompt, "prompt asks for a ```json code block")
     check("אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד." in prompt, "prompt: no emoji outside emoji field")
-    check("גם מילות היעד בשדה word חייבות להיות בניקוד מלא." in prompt, "prompt: target words fully vocalized")
-    check("כתוב בכתיב מלא (כמו טקסט רגיל בלי ניקוד), ועליו הוסף ניקוד מלא." in prompt, "prompt: ktiv male + full nikud")
+    check("כתוב את כל הטקסט בלי ניקוד בכלל" in prompt, "prompt: no nikud at all")
+    check("כתוב בכתיב מלא תקני" in prompt and "ועליו הוסף ניקוד" not in prompt and "בניקוד מלא" not in prompt, "prompt: ktiv male, no nikud instructions")
+    check(not page.evaluate("(p) => Hebrew.hasNikud(p)", prompt), "prompt (schema example included) has no nikud characters")
     check("העתיקו את התשובה בכפתור ההעתקה שמעל בלוק הקוד" in page.text_content("#step2"), "step 2 hint shown")
     page.screenshot(path=os.path.join(OUT, "v2-step2.png"), full_page=True)
 

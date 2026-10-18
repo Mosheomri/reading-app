@@ -83,10 +83,13 @@ with sync_playwright() as p:
     page.click("#step2 [data-go='3']")
     page.fill("#response", json.dumps(lesson, ensure_ascii=False))
     page.click("#parseBtn")
-    msgs = page.text_content("#parseMsgs")
-    check("מילים בלי ניקוד" in msgs and all(w in msgs for w in ["לדני", "יש", "קטן", "איך", "עץ"]), "unvocalized warning lists words")
-    check("לדני" in page.text_content("#fixText"), "unvocalized words in fix message")
-    page.click("#continueAnyway")
+    # Nikud comes from Dicta: no unvocalized warning at the paste step, nothing about it sent to the AI.
+    check("בלי ניקוד" not in (page.text_content("#parseMsgs") or ""), "paste step: no unvocalized warning")
+    check(page.is_hidden("#fixBox") or "לדני" not in page.text_content("#fixText"), "unvocalized words not in fix message")
+    if page.is_visible("#continueAnyway"): page.click("#continueAnyway")
+    msgs = page.text_content("#checkMsgs")
+    check("מילים בלי ניקוד" in msgs and all(w in msgs for w in ["לדני", "יש", "קטן", "איך", "עץ"]) and "בדיקטה" in msgs,
+          "preview: info lists unvocalized words, points to Dicta")
     marked = page.eval_on_selector_all("#preview .no-nikud", "els => els.map(e => e.textContent)")
     print("    marked:", marked)
     check(set(["לדני", "יש", "קטן", "איך", "עץ"]) <= set(marked), "preview marks story, question, chips")
@@ -106,8 +109,18 @@ with sync_playwright() as p:
     msgs = page.text_content("#checkMsgs")
     check("לדני" not in msgs and "איך" in msgs, "warning updates live after editing")
 
+    # Dicta fills the remaining unvocalized words (איך, עץ); vocalized words are compared
+    page.click("#makeLink")
+    check(page.text_content("#compareNikud") == "השוואה", "lesson with some nikud → compare button")
+    dicta = page.evaluate("(s) => Review.slots(Lesson.coerce(s).lesson, true).map(x => x.get().trim()).filter(Boolean).join('\\n')", sample)
+    page.fill("#dictaText", dicta)
+    page.click("#compareNikud")
+    check("הוחל על 2 מילים" in page.text_content("#nikudMsgs") and page.locator(".nikud-row").count() == 0, "unvocalized words filled, nothing to compare")
+    L = draft(page)
+    check(L["exercises"][0]["question"] == "אֵיךְ קוֹרְאִים לַכֶּלֶב?" and L["targetWords"][3]["word"] == "עֵץ", "filled words stored")
+
     # Child page never shows marks
-    page.click("#makeLink"); page.click("#toLink")
+    page.click("#toLink")
     child = browser.new_page()
     child.goto(page.text_content("#linkBox"))
     child.click("text=מתחילים ▶")

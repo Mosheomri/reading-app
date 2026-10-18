@@ -235,7 +235,8 @@
   }
 
   // request (optional): {length: number, wordsMode: 'number'|'list', wordCount: n, words: [..]}
-  // Returns {errors, warnings, wordCount, missingWords, unvocalized}.
+  // Returns {errors, warnings, wordCount, missingWords}. Nikud is not checked here:
+  // it is added with Dicta in the check step.
   function check(lesson, request) {
     var errors = [];
     var warnings = [];
@@ -294,13 +295,6 @@
         : 'מילת היעד "' + t + '" לא מופיעה בסיפור.');
     });
 
-    var unvocalized = lesson.nikudMode === 'full' ? unvocalizedWords(lesson) : [];
-    if (unvocalized.length) {
-      var shown = unvocalized.slice(0, 15).join(', ');
-      warnings.push('מילים בלי ניקוד (מסומנות באדום בתצוגה): ' + shown +
-        (unvocalized.length > 15 ? ' ועוד ' + (unvocalized.length - 15) : '') + '.');
-    }
-
     var storyBare = bareWords(lesson.story);
     if (!lesson.exercises.length) errors.push('אין תרגילים.');
     lesson.exercises.forEach(function (ex, i) {
@@ -325,7 +319,7 @@
       }
     });
 
-    return { errors: errors, warnings: warnings, wordCount: wordCount, missingWords: missingWords, unvocalized: unvocalized };
+    return { errors: errors, warnings: warnings, wordCount: wordCount, missingWords: missingWords };
   }
 
   // A short message the teacher can send back to her AI.
@@ -333,7 +327,7 @@
     if (!problems.length) return '';
     return 'יש כמה בעיות בתשובה שלך:\n' +
       problems.map(function (p) { return '- ' + p; }).join('\n') +
-      '\n\nתקן אותן והחזר את ה-JSON המלא והמתוקן בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, באותו מבנה ובניקוד מלא.';
+      '\n\nתקן אותן והחזר את ה-JSON המלא והמתוקן בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, באותו מבנה ובלי ניקוד.';
   }
 
   /* ---------- Link encode / decode ---------- */
@@ -373,6 +367,7 @@
     coerce: coerce,
     check: check,
     sortOrderExercises: sortOrderExercises,
+    unvocalizedWords: unvocalizedWords,
     fixMessage: fixMessage,
     clean: clean,
     encode: encode,

@@ -251,7 +251,16 @@
     return H.bare(w).replace(/[וי]/g, '');
   }
 
-  // Returns {error, details} or {diffs: [{slot, index, ai, dicta, spelling, before, after, choice}]}.
+  // Does any lesson text have nikud? A lesson straight from the AI has none.
+  function hasAnyNikud(lesson) {
+    return slots(lesson, true).some(function (s) { return H.hasNikud(s.get()); });
+  }
+
+  // Lines up the lesson words with the text pasted from Dicta.
+  // Words without nikud just take Dicta's word (same letters required): fills.
+  // Vocalized words that differ are left for the teacher to choose: diffs.
+  // Returns {error, details} or {fills: [{slot, index, word}],
+  // diffs: [{slot, index, ai, dicta, spelling, before, after, choice}]}.
   // spelling: the words differ only in ו/י (ktiv male vs. haser).
   function compareNikud(lesson, pasted) {
     var ours = [];
@@ -286,7 +295,9 @@
 
     var letterDiffs = [];
     ours.forEach(function (o, i) {
-      if (looseLetters(o.text) !== looseLetters(theirs[i])) letterDiffs.push('"' + H.stripNikud(o.text) + '" מול "' + H.stripNikud(theirs[i]) + '"');
+      // Our unvocalized words must match exactly; vocalized ones may be in ktiv haser.
+      var same = H.hasNikud(o.text) ? looseLetters(o.text) === looseLetters(theirs[i]) : H.bare(o.text) === H.bare(theirs[i]);
+      if (!same) letterDiffs.push('"' + H.stripNikud(o.text) + '" מול "' + H.stripNikud(theirs[i]) + '"');
     });
     if (letterDiffs.length) {
       return {
@@ -296,8 +307,13 @@
       };
     }
 
+    var fills = [];
     var diffs = [];
     ours.forEach(function (o, i) {
+      if (!H.hasNikud(o.text)) {
+        if (H.hasNikud(theirs[i])) fills.push({ slot: o.slot, index: o.index, word: H.normalize(theirs[i]) });
+        return;
+      }
       var spelling = H.bare(o.text) !== H.bare(theirs[i]);
       if (!spelling && sameNikud(o.text, theirs[i])) return;
       var slotWords = words(o.slot.get());
@@ -312,19 +328,42 @@
         choice: 'ai'
       });
     });
-    return { diffs: diffs };
+    return { fills: fills, diffs: diffs };
   }
 
-  // Replace the index-th word of a slot. The new word must be a single word.
-  function setWord(slot, index, word) {
-    if (words(word).length !== 1) return false;
+  // Replace words of one slot: byIndex maps word index → new word (each a single word).
+  function setWords(slot, byIndex) {
+    for (var key in byIndex) if (words(byIndex[key]).length !== 1) return false;
     var k = -1;
     slot.set(H.tokenize(slot.get()).map(function (seg) {
       if (!seg.isWord) return seg.text;
       k++;
-      return k === index ? word : seg.text;
+      return byIndex.hasOwnProperty(k) ? byIndex[k] : seg.text;
     }).join(''));
     return true;
+  }
+
+  // Replace the index-th word of a slot. The new word must be a single word.
+  function setWord(slot, index, word) {
+    var byIndex = {};
+    byIndex[index] = word;
+    return setWords(slot, byIndex);
+  }
+
+  // Apply compareNikud fills, one pass per slot. Returns the number of words replaced.
+  function applyFills(fills) {
+    var groups = {};
+    var order = [];
+    fills.forEach(function (f) {
+      if (!groups[f.slot.key]) { groups[f.slot.key] = { slot: f.slot, byIndex: {} }; order.push(f.slot.key); }
+      groups[f.slot.key].byIndex[f.index] = f.word;
+    });
+    var n = 0;
+    order.forEach(function (key) {
+      var g = groups[key];
+      if (setWords(g.slot, g.byIndex)) n += Object.keys(g.byIndex).length;
+    });
+    return n;
   }
 
   window.Review = {
@@ -336,7 +375,9 @@
     locate: locate,
     applySuggestion: applySuggestion,
     plainText: plainText,
+    hasAnyNikud: hasAnyNikud,
     compareNikud: compareNikud,
+    applyFills: applyFills,
     haserWords: haserWords,
     setWord: setWord
   };

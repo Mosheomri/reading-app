@@ -17,6 +17,7 @@
     settings: null,   // last submitted form values
     request: null,    // what was asked from the AI, for validation; null for loaded files
     lesson: null,
+    nikudVerified: null, // Review.signature of the text that was last vocalized with Dicta
     link: ''
   };
 
@@ -35,7 +36,7 @@
   function saveDraftSoon() {
     clearTimeout(saveDraftTimer);
     saveDraftTimer = setTimeout(function () {
-      if (state.lesson) save(STORE_DRAFT, { lesson: state.lesson, request: state.request });
+      if (state.lesson) save(STORE_DRAFT, { lesson: state.lesson, request: state.request, nikudVerified: state.nikudVerified });
     }, 400);
   }
 
@@ -68,6 +69,7 @@
 
   function showStep(n) {
     if (n >= 4 && !state.lesson) n = 3;
+    if (n === 6 && linkBlockers().length) { goToLink(); return; }
     if (n === 2 && !$('promptText').textContent) n = 1;
     state.step = n;
     state.maxStep = Math.max(state.maxStep, n);
@@ -214,9 +216,11 @@
     $('fixBox').hidden = false;
   }
 
-  function acceptLesson(lesson, request) {
+  // nikudVerified: signature of text already vocalized with Dicta, or null.
+  function acceptLesson(lesson, request, nikudVerified) {
     state.lesson = lesson;
     state.request = request;
+    state.nikudVerified = nikudVerified || null;
     state.maxStep = Math.min(state.maxStep, 4);
     resetCheckStep();
     saveDraftSoon();
@@ -233,7 +237,9 @@
       var c = ex.error ? { lesson: null, fatal: ['הקובץ אינו קובץ שיעור תקין.'] } : L.coerce(ex.value);
       if (!c.lesson) { msgs.appendChild(msgBox('error', 'לא הצלחתי לטעון את הקובץ:', c.fatal)); return; }
       state.maxStep = 3;
-      acceptLesson(c.lesson, null);
+      // A saved lesson file came out of this app: if every word has nikud, it was already vocalized.
+      var vocalized = RV.hasAnyNikud(c.lesson) && !L.unvocalizedWords(c.lesson).length;
+      acceptLesson(c.lesson, null, vocalized ? RV.signature(c.lesson) : null);
     };
     reader.onerror = function () { msgs.appendChild(msgBox('error', 'לא הצלחתי לקרוא את הקובץ.')); };
     reader.readAsText(file);
@@ -414,21 +420,48 @@
     var haser = haserBox();
     if (haser) msgs.appendChild(haser);
     if (!res.errors.length && !res.warnings.length && !haser) msgs.appendChild(msgBox('ok', 'הכל תקין ✓'));
+    var nikudNote = nikudNoteBox();
+    if (nikudNote) msgs.appendChild(nikudNote);
     $('makeLink').disabled = res.errors.length > 0;
+    $('makeLink').textContent = nikudRequired() ? 'המשך לבדיקה ולניקוד ←' : 'המשך לבדיקה ←';
     var stepMsgs = U.clear($('haserMsgs'));
     if (haser) stepMsgs.appendChild(haserBox());
 
+    // Before Dicta the whole lesson is unvocalized; marking every word would be noise.
+    var mark = RV.hasAnyNikud(lesson);
     var p = U.clear($('preview'));
-    p.appendChild(el('h2', { style: 'text-align:center' }, R.markedText(lesson, lesson.title)));
+    p.appendChild(el('h2', { style: 'text-align:center' }, previewText(lesson, lesson.title, mark)));
     p.appendChild(el('div', { class: 'target-chips' }, lesson.targetWords.map(function (t) {
-      return el('span', { class: 'chip' }, t.emoji + ' ', R.markedText(lesson, t.word));
+      return el('span', { class: 'chip' }, t.emoji + ' ', previewText(lesson, t.word, mark));
     })));
-    p.appendChild(el('div', { class: 'story' }, R.story(lesson, null, true)));
+    p.appendChild(el('div', { class: 'story' }, R.story(lesson, null, mark)));
     p.appendChild(el('h3', { style: 'margin-top:16px' }, 'תרגילים'));
     lesson.exercises.forEach(function (ex, i) {
       if (ex.unknown) return;
-      p.appendChild(exercisePreview(lesson, ex, i));
+      p.appendChild(exercisePreview(lesson, ex, i, mark));
     });
+  }
+
+  function previewText(lesson, s, mark) {
+    return mark ? R.markedText(lesson, s) : document.createTextNode(R.text(lesson, s || ''));
+  }
+
+  // Where the lesson stands with nikud, for the preview. Not a warning: nikud comes in the next step.
+  function nikudNoteBox() {
+    var lesson = state.lesson;
+    if (!nikudRequired()) return null;
+    if (!RV.hasAnyNikud(lesson)) return msgBox('info', 'השיעור עדיין בלי ניקוד. הניקוד יתווסף בשלב הבא, בעזרת הנקדן של דיקטה.');
+    var missing = lesson.nikudMode === 'full' ? L.unvocalizedWords(lesson) : [];
+    if (missing.length) {
+      return msgBox('info', 'מילים בלי ניקוד (מסומנות באדום). הן ינוקדו בשלב הניקוד בדיקטה:',
+        [missing.slice(0, 15).join(', ') + (missing.length > 15 ? ' ועוד ' + (missing.length - 15) : '')]);
+    }
+    if (!nikudDone()) {
+      return msgBox('info', state.nikudVerified
+        ? 'הטקסט השתנה מאז הניקוד בדיקטה. צריך לנקד שוב בשלב הבא.'
+        : 'בשלב הבא משווים את הניקוד לנקדן של דיקטה.');
+    }
+    return null;
   }
 
   // Not blocking: holam/qubuts without ו may be fine (כֹּל), so the teacher decides.
@@ -437,10 +470,10 @@
     return list.length ? msgBox('warn', 'ייתכן כתיב חסר (חולם או קובוץ בלי ו):', [list.join(', ')]) : null;
   }
 
-  function exercisePreview(lesson, ex, i) {
+  function exercisePreview(lesson, ex, i, mark) {
     var box = el('div', { class: 'ex-preview' });
     var num = (i + 1) + '. ';
-    function t(s) { return R.markedText(lesson, s); }
+    function t(s) { return previewText(lesson, s, mark); }
     function optionList() {
       return el('ol', null, ex.options.map(function (o, j) {
         return el('li', { class: j === ex.answer ? 'correct' : '' }, t(o), j === ex.answer ? ' ✓' : '');
@@ -453,7 +486,7 @@
       box.appendChild(el('div', null, num, t(ex.statement)));
       box.appendChild(el('div', { class: 'correct' }, ex.answer === true ? 'נכון ✓' : ex.answer === false ? 'לא נכון ✓' : ''));
     } else if (ex.type === 'fill') {
-      box.appendChild(el('div', null, num, R.fillSentence(lesson, ex.sentence, null, true)));
+      box.appendChild(el('div', null, num, R.fillSentence(lesson, ex.sentence, null, mark)));
       box.appendChild(optionList());
     } else if (ex.type === 'order') {
       box.appendChild(el('div', null, num + 'סידור משפטים (הילד יקבל אותם מעורבבים):'));
@@ -462,10 +495,26 @@
     return box;
   }
 
-  /* ---------- Step 5: optional checks ---------- */
+  /* ---------- Step 5: text review (optional) and nikud with Dicta ---------- */
 
   var RV = window.Review;
-  var nikud = { diffs: [], signature: null };
+
+  // With full or partial nikud, the nikud must come from Dicta before a link is made.
+  function nikudRequired() {
+    return state.lesson.nikudMode !== 'none';
+  }
+
+  // Dicta was applied to the text as it is now.
+  function nikudDone() {
+    return !nikudRequired() || state.nikudVerified === RV.signature(state.lesson);
+  }
+
+  // Lesson errors, and a missing nikud step, block the link.
+  function linkBlockers() {
+    var out = L.check(state.lesson, state.request).errors.slice();
+    if (!nikudDone()) out.push('NIKUD');
+    return out;
+  }
 
   function resetCheckStep() {
     $('reviewPromptBox').hidden = true;
@@ -478,35 +527,56 @@
   }
 
   function clearNikudResults() {
-    nikud = { diffs: [], signature: null };
     U.clear($('nikudMsgs'));
     U.clear($('nikudList'));
   }
 
-  // The nikud comparison is tied to the text it was made against.
+  // The Dicta result is tied to the text it was applied to.
   function nikudIsStale() {
-    return nikud.signature !== null && nikud.signature !== RV.signature(state.lesson);
+    return state.nikudVerified !== null && state.nikudVerified !== RV.signature(state.lesson);
   }
 
   function dropStaleNikud() {
     if (!nikudIsStale()) return;
+    state.nikudVerified = null;
+    saveDraftSoon();
     clearNikudResults();
-    $('nikudMsgs').appendChild(msgBox('info', 'הטקסט השתנה מאז ההשוואה. כדי לבדוק שוב, העתיקו את הטקסט מחדש והשוו.'));
+    $('nikudMsgs').appendChild(msgBox('info', 'הטקסט השתנה מאז הניקוד. העתיקו את הטקסט מחדש ונקדו שוב בדיקטה.'));
+  }
+
+  // Step 5 layout depends on the nikud mode and on whether the lesson has nikud yet.
+  function syncCheckStep() {
+    var required = nikudRequired();
+    $('step5Title').textContent = required ? 'בדיקה וניקוד' : 'בדיקה (לא חובה)';
+    $('step5Intro').textContent = required
+      ? 'אפשר לבדוק את הטקסט (לא חובה). אחר כך מנקדים בנקדן של דיקטה: זה חובה לפני יצירת קישור.'
+      : 'במצב בלי ניקוד אין צורך לנקד. אפשר לבדוק את הטקסט לפני שיוצרים קישור, או לדלג.';
+    $('skipCheck').hidden = required;
+    $('nikudPart').hidden = !required;
+    $('compareNikud').textContent = RV.hasAnyNikud(state.lesson) ? 'השוואה' : 'החלת הניקוד';
   }
 
   function enterCheckStep() {
     U.clear($('checkStepMsgs'));
     dropStaleNikud();
+    syncCheckStep();
+    if (nikudRequired() && nikudDone() && !$('nikudMsgs').children.length) {
+      $('nikudMsgs').appendChild(msgBox('ok', 'הטקסט מנוקד ✓'));
+    }
   }
 
   function goToLink() {
-    var res = L.check(state.lesson, state.request);
+    var blockers = linkBlockers();
+    if (!blockers.length) { showStep(6); return; }
+    if (state.step !== 5) showStep(5);
     var msgs = U.clear($('checkStepMsgs'));
-    if (res.errors.length) {
-      msgs.appendChild(msgBox('error', 'אחרי השינויים צריך לתקן כמה דברים לפני יצירת קישור (בשלב העריכה):', res.errors));
-      return;
+    var errors = blockers.filter(function (b) { return b !== 'NIKUD'; });
+    if (errors.length) {
+      msgs.appendChild(msgBox('error', 'אחרי השינויים צריך לתקן כמה דברים לפני יצירת קישור (בשלב העריכה):', errors));
     }
-    showStep(6);
+    if (errors.length !== blockers.length) {
+      msgs.appendChild(msgBox('error', 'לפני יצירת קישור צריך לנקד את הטקסט בדיקטה (חלק 2 למעלה).'));
+    }
   }
 
   /* 1. Text review */
@@ -546,7 +616,7 @@
       item.reason ? el('p', { class: 'muted small' }, item.reason) : null,
       // A fix without nikud replaces vocalized text with plain letters.
       loc && !H.hasNikud(item.fix) && H.hasNikud(loc.slot.get().slice(loc.start, loc.end))
-        ? el('p', { class: 'small fix-note' }, 'ℹ️ התיקון בלי ניקוד. אחרי האישור כדאי לנקד אותו בעריכה, או בבדיקת הניקוד מול דיקטה שבהמשך.')
+        ? el('p', { class: 'small fix-note' }, 'ℹ️ התיקון בלי ניקוד. אחרי האישור צריך לנקד שוב בדיקטה (חלק 2).')
         : null,
       actions);
 
@@ -576,16 +646,24 @@
 
   /* 2. Nikud check */
 
+  // Unvocalized words take Dicta's nikud directly; vocalized words that differ are listed for a choice.
   function compareNikud() {
     var msgs = U.clear($('nikudMsgs'));
     var list = U.clear($('nikudList'));
-    nikud = { diffs: [], signature: null };
+    U.clear($('checkStepMsgs'));
     var r = RV.compareNikud(state.lesson, $('dictaText').value);
     if (r.error) { msgs.appendChild(msgBox('error', r.error, r.details)); return; }
-    nikud = { diffs: r.diffs, signature: RV.signature(state.lesson) };
-    if (!r.diffs.length) { msgs.appendChild(msgBox('ok', 'הניקוד זהה לניקוד של דיקטה ✓')); return; }
+    var filled = RV.applyFills(r.fills);
+    state.nikudVerified = RV.signature(state.lesson);
+    changed();
+    syncCheckStep();
+    if (filled) msgs.appendChild(msgBox('ok', 'הניקוד של דיקטה הוחל על ' + (filled === 1 ? 'מילה אחת' : filled + ' מילים') + ' ✓'));
+    if (!r.diffs.length) {
+      if (!filled) msgs.appendChild(msgBox('ok', 'הניקוד זהה לניקוד של דיקטה ✓'));
+      return;
+    }
 
-    msgs.appendChild(msgBox('info', 'נמצאו ' + r.diffs.length + ' מילים שונות (בניקוד או בכתיב). בחרו לכל מילה את הגרסה הנכונה.'));
+    msgs.appendChild(msgBox('info', 'נמצאו ' + r.diffs.length + ' מילים מנוקדות שהניקוד שלהן שונה (או הכתיב). בחרו לכל מילה את הגרסה הנכונה.'));
     var acceptAll = el('button', { type: 'button', class: 'btn small' }, 'קבל את כל דיקטה');
     list.appendChild(el('div', { class: 'row', style: 'margin-bottom:10px' }, acceptAll));
     var rows = r.diffs.map(nikudRow);
@@ -614,7 +692,7 @@
       if (nikudIsStale()) { dropStaleNikud(); return; }
       if (!RV.setWord(d.slot, d.index, choice === 'ai' ? d.ai : d.dicta)) { toast('לא הצלחתי להחליף את המילה.'); return; }
       d.choice = choice;
-      nikud.signature = RV.signature(state.lesson);
+      state.nikudVerified = RV.signature(state.lesson);
       show();
       changed();
     }
@@ -696,7 +774,7 @@
         $('resumeDraft').hidden = false;
         $('resumeDraft').addEventListener('click', function () {
           state.maxStep = 3;
-          acceptLesson(c.lesson, draft.request || null);
+          acceptLesson(c.lesson, draft.request || null, draft.nikudVerified);
         });
       }
     }

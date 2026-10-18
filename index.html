@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;600;700&display=swap">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=2">
 </head>
 <body>
   <div class="wrap" id="wrap">
@@ -54,7 +54,7 @@
           <div id="wordsListBox" class="field" style="margin-top:10px" hidden>
             <label for="wordList">המילים (מופרדות בפסיק או בשורה חדשה)</label>
             <textarea id="wordList" rows="3" placeholder="כלב, גינה, כדור"></textarea>
-            <div class="hint">בין 2 ל-10 מילים. אפשר בלי ניקוד, הבינה תנקד.</div>
+            <div class="hint">בין 2 ל-10 מילים, בלי ניקוד. הניקוד יתווסף בהמשך בעזרת הנקדן של דיקטה.</div>
           </div>
         </div>
 
@@ -152,17 +152,17 @@
       </div>
     </section>
 
-    <!-- Step 5: optional checks -->
+    <!-- Step 5: text review (optional) and nikud with Dicta (required unless "no nikud") -->
     <section id="step5" class="card" hidden>
       <div class="row">
-        <h2 class="grow" style="margin:0">בדיקה (לא חובה)</h2>
+        <h2 class="grow" style="margin:0" id="step5Title">בדיקה וניקוד</h2>
         <button type="button" class="btn small quiet" id="skipCheck">דילוג ליצירת קישור ←</button>
       </div>
-      <p class="muted" style="margin-top:8px">אפשר לבדוק את הטקסט ואת הניקוד לפני שיוצרים קישור, או לדלג על אחד החלקים או על שניהם.</p>
+      <p class="muted" style="margin-top:8px" id="step5Intro"></p>
       <div class="msgs" id="haserMsgs"></div>
 
       <div class="check-part">
-        <h3>1. בדיקת טקסט: איות, דקדוק וניסוח</h3>
+        <h3>1. בדיקת טקסט: איות, דקדוק וניסוח <span class="muted small">(לא חובה)</span></h3>
         <p class="small">💡 מומלץ להשתמש בבינה אחרת, או לפחות בצ׳אט חדש, כדי לקבל עין רעננה.</p>
         <div class="row" style="margin-bottom:12px">
           <button type="button" class="btn" id="makeReviewPrompt">יצירת פרומפט ביקורת</button>
@@ -188,8 +188,9 @@
         <div id="reviewList"></div>
       </div>
 
-      <div class="check-part">
-        <h3>2. בדיקת ניקוד מול הנקדן של דיקטה</h3>
+      <div class="check-part" id="nikudPart">
+        <h3>2. ניקוד בנקדן של דיקטה <span class="tag">חובה</span></h3>
+        <p class="small">💡 כדאי לעשות קודם את בדיקת הטקסט: כל שינוי בטקסט אחרי הניקוד מחייב לנקד שוב.</p>
         <ol class="small check-steps">
           <li>
             <button type="button" class="btn small" id="copyPlain">📋 העתק טקסט בלי ניקוד</button>
@@ -199,13 +200,13 @@
             בדיקטה, בגלגל השיניים, בחרו: <strong>סגנון מודרני, ניקוד בכתיב מלא</strong>.
             אחר כך הדביקו את הטקסט, לחצו על "נקד" והעתיקו את התוצאה.
           </li>
-          <li>הדביקו כאן את הטקסט המנוקד:</li>
+          <li>הדביקו כאן את הטקסט המנוקד. האתר יבדוק שהאותיות זהות ויוסיף את הניקוד לשיעור:</li>
         </ol>
         <div class="field">
           <textarea id="dictaText" rows="6" lang="he" placeholder="הטקסט המנוקד מדיקטה"></textarea>
         </div>
         <div class="row" style="margin-bottom:12px">
-          <button type="button" class="btn" id="compareNikud">השוואה</button>
+          <button type="button" class="btn primary" id="compareNikud">החלת הניקוד</button>
         </div>
         <div class="msgs" id="nikudMsgs"></div>
         <div id="nikudList"></div>
@@ -243,13 +244,13 @@
     </section>
   </div>
 
-  <script src="js/lz-string.min.js"></script>
-  <script src="js/hebrew.js"></script>
-  <script src="js/util.js"></script>
-  <script src="js/lesson.js"></script>
-  <script src="js/render.js"></script>
-  <script src="js/prompt.js"></script>
-  <script src="js/review.js"></script>
-  <script src="js/builder.js"></script>
+  <script src="js/lz-string.min.js?v=2"></script>
+  <script src="js/hebrew.js?v=2"></script>
+  <script src="js/util.js?v=2"></script>
+  <script src="js/lesson.js?v=2"></script>
+  <script src="js/render.js?v=2"></script>
+  <script src="js/prompt.js?v=2"></script>
+  <script src="js/review.js?v=2"></script>
+  <script src="js/builder.js?v=2"></script>
 </body>
 </html>

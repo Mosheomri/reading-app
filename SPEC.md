@@ -18,6 +18,9 @@ then sends the child a link. The child plays, reads and answers – **no AI, no 
   The hash is never sent to any server, so no data about the child or lesson is stored anywhere.
 - Vendor LZ-String locally (`js/lz-string.min.js`), do not rely on a CDN.
 - No analytics, no cookies, no tracking. `localStorage` only for teacher conveniences (e.g. last form values).
+- Local scripts and CSS are linked with a version query (`js/builder.js?v=2`). Bump the number in `index.html`
+  and `play.html` on every release, so browsers do not run an old cached copy.
+- Automated tests: Playwright (Python) suites in `tests/`, run with `python tests/run_all.py`.
 
 Suggested structure:
 ```
@@ -68,8 +71,31 @@ Suggested structure:
 - Show the full lesson exactly as the child will see it.
 - Everything editable: story text (including nikud), target words, emojis, questions, options, answers.
 - Highlight target words in the story.
+- The lesson usually has no nikud yet at this point (section 7). The preview says so as an info message
+  (not a warning) when the nikud mode is full or partial. Words without nikud are marked in red only once
+  the lesson has some nikud (e.g. a word added after Dicta).
+- Non-blocking warning "ייתכן כתיב חסר": words with holam or qubuts on a letter other than ו, with no ו or א
+  after it (exceptions: פה, כה, איפה, משה, also with prefixes). Works once the text has nikud.
 
-### Step 5: Link
+### Step 5: Check and nikud
+1. **Text review (optional)**: a prompt for a second AI with all lesson texts **without nikud**, so ktiv haser
+   stands out. The AI returns JSON suggestions `{field, type: error|style, original, fix, reason}` (fix without
+   nikud); the teacher approves or rejects each one. `original` is matched as whole words, ignoring nikud.
+2. **Nikud with Dicta**: **required** before a link when the nikud mode is full or partial; hidden (and skipped)
+   when it is none.
+   - Copy all lesson text without nikud (title, target words, story, exercises; one field per line),
+     vocalize it in Dicta Nakdan (modern style, ktiv male), paste the result back.
+   - The pasted text must have the same number of words. Words that have no nikud in the lesson take Dicta's
+     word as is, after checking the letters are identical. A lesson without nikud is therefore vocalized with
+     no comparison at all.
+   - Words that already have nikud (e.g. a lesson file made before, or a teacher's own vocalization) are
+     compared: only differing words are listed, and the teacher picks the lesson's version or Dicta's
+     (ו/י-only spelling differences are allowed for these words and tagged "כתיב שונה").
+   - The nikud step is tied to the text it was applied to. Any text change afterwards requires Dicta again
+     before a link (the progress bar cannot skip it either). The state is kept in the saved draft; a loaded
+     lesson file in which every word has nikud counts as vocalized.
+
+### Step 6: Link
 - Build the link, show it, "העתק קישור" button and "שלח בוואטסאפ" button (`https://wa.me/?text=...`).
 - "פתח לבדיקה" button that opens `play.html` with the lesson.
 - Button to download the lesson JSON (backup) and to load a JSON file back for editing.
@@ -131,7 +157,9 @@ Types (rendered one at a time):
 ```
 
 Rules:
-- `story`, `title`, words, questions and options are **always stored fully vocalized**. The display mode is applied at render time (section 7).
+- With nikud mode full or partial, `story`, `title`, words, questions and options are **stored fully vocalized**
+  (by Dicta, step 5). The display mode is applied at render time (section 7). With mode none they may be stored
+  without nikud.
 - `order.sentences` is stored in the correct order; the player shuffles.
 
 ### Validation (teacher page, before creating link)
@@ -139,6 +167,7 @@ Rules:
 - Story word count within ±15% of the requested length (show the actual count; warning, not blocking).
 - Every target word appears in the story at least once – compare after stripping nikud, and allow Hebrew prefixes (ו, ה, ב, כ, ל, מ, ש, and combinations like וה, שב).
 - Number of target words matches the request (warning).
+- Nikud is not validated here: it is added in step 5. Messages about nikud are never sent back to the AI.
 
 ---
 
@@ -150,26 +179,32 @@ Written in Hebrew. Placeholders in `{}`.
 אתה כותב תוכן ללימוד קריאה לילד בהוראה מותאמת.
 
 כתוב סיפור קצר בעברית בנושא: {topic}
-אורך הסיפור: בערך {length} מילים.
+אורך הסיפור: {P} פסקאות, בכל פסקה {S} משפטים קצרים, סך הכול בערך {length} מילים.
 {IF words given} מילות היעד: {words}. כל מילת יעד חייבת להופיע בסיפור לפחות פעמיים.
 {IF number given} בחר {n} מילות יעד פשוטות ומוחשיות שקשורות לנושא. כל מילה חייבת להופיע בסיפור לפחות פעמיים.
 
 הנחיות לסיפור:
 - משפטים קצרים ופשוטים, שפה של ילדים.
-- כתוב את כל הטקסט בניקוד מלא ומדויק: הכותרת, הסיפור, המילים, השאלות והתשובות.
+- כתוב את כל הטקסט בלי ניקוד בכלל: הכותרת, הסיפור, המילים, השאלות והתשובות.
+- כתוב בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר).
 - לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה.
+- אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד.
 
 תרגילים:
 - 3 שאלות הבנה אמריקאיות (3 אפשרויות כל אחת).
 - 2 משפטי נכון/לא נכון.
 - 2 משפטים להשלמת מילה חסרה (סמן את החסר ב-___), עם 3 אפשרויות.
 - תרגיל סידור אחד: 4 משפטים מהסיפור, בסדר הנכון.
+- בשדה answer: מספר האפשרות הנכונה, כשהאפשרות הראשונה היא 0.
 
-החזר JSON בלבד, בלי שום טקסט לפניו או אחריו, בדיוק במבנה הזה:
-{schema example from section 5, with nikudMode set to "full"}
+החזר את ה-JSON בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, בדיוק במבנה הזה:
+{schema example from section 5, without nikud and without nikudMode}
 ```
 
-Keep the prompt template in one place (`js/builder.js` or a separate `js/prompt.js`) so it is easy to tune.
+- The length is given as paragraphs and sentences (about 8 words per sentence, 4 sentences per paragraph),
+  because AIs follow those better than a word count, plus the total word count.
+- The AI writes **without nikud**: its nikud is unreliable. Nikud comes from Dicta in step 5.
+- The template lives in `js/prompt.js` so it is easy to tune.
 
 ---
 
@@ -185,17 +220,19 @@ Keep the prompt template in one place (`js/builder.js` or a separate `js/prompt.
 
 ---
 
+Source of nikud: Dicta Nakdan, by copy-paste in step 5 (no API call, so the site stays static).
+
 ## 8. Out of scope for v1 (planned)
 
 - Nikud verification layer: verified word dictionary (JSON) + deterministic comparison, coloring words green / red / gray; homographs flagged for review, not as errors.
-- Optional integration with Dicta Nakdan for vocalization.
+- Direct (API) integration with Dicta Nakdan instead of copy-paste.
 - Word-search game, printable worksheet, custom GPT / Gemini Gem for teachers.
 
 ---
 
 ## 9. Definition of done for v1
 
-- Teacher can go form → prompt → paste → preview/edit → link, on phone and desktop.
+- Teacher can go form → prompt → paste → preview/edit → check and nikud → link, on phone and desktop.
 - Child link opens and runs the full flow with no network calls except loading fonts.
 - Works on GitHub Pages.
 - A sample lesson file `samples/sample-lesson.json` and a README (Hebrew) explaining how a teacher uses the site.

@@ -168,8 +168,14 @@ with sync_playwright() as p:
     page.locator(".tw-row").nth(0).locator("input.emoji").fill("🐕")
     page.wait_for_timeout(300)
     page.click("#makeLink")
-    page.click("#skipCheck")
-    check(page.is_visible("#step6") and page.text_content("#linkBox").startswith(BASE + "play.html#"), "skip → link")
+    check(page.is_hidden("#skipCheck") and "חובה" in page.text_content("#nikudPart h3"), "full nikud: no skip button, Dicta part marked required")
+    page.click("#toLink")
+    check(page.is_visible("#step5") and "לנקד את הטקסט בדיקטה" in page.text_content("#checkStepMsgs"), "edited text must go through Dicta again")
+    cur = page.evaluate("(l) => Review.slots(l, true).map(s => s.get().trim()).filter(Boolean).join('\\n')", lesson())
+    page.fill("#dictaText", cur)
+    page.click("#compareNikud")
+    page.click("#toLink")
+    check(page.is_visible("#step6") and page.text_content("#linkBox").startswith(BASE + "play.html#"), "after Dicta → link")
 
     # Link carries the edits
     child = ctx.new_page()
