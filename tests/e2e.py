@@ -185,7 +185,7 @@ with sync_playwright() as p:
     size1 = child.evaluate("getComputedStyle(document.querySelector('.reader .story')).fontSize")
     check(size0 == "30px" and size1 == "34px", "text size %s → %s" % (size0, size1))
     child.screenshot(path=os.path.join(OUT, "c3-reading.png"), full_page=True)
-    child.click(".stage-actions .btn")
+    child.click("text=סיימתי לקרוא ←")
 
     # Exercises
     dec = child.evaluate("Lesson.decode(location.hash)")

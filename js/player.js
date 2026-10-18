@@ -19,6 +19,7 @@
   var storySize = 30;
   var progress = { done: 0, total: 1 };
   var score = { firstTry: 0 };
+  var cleanup = null; // stops whatever the current screen runs (paced reading timer)
 
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
@@ -30,6 +31,7 @@
   }
 
   function screen() {
+    if (cleanup) { cleanup(); cleanup = null; }
     U.clear(stage);
     window.scrollTo(0, 0);
     return stage;
@@ -128,7 +130,12 @@
     if (ctx.hasVoice) s.appendChild(el('p', { class: 'muted small' }, 'לחצו על מילה כדי לשמוע אותה 🔊'));
 
     reader.appendChild(el('div', { class: 'story' }, R.story(lesson, ctx.hasVoice ? ctx.speak : null)));
+    var paced = window.Reading.controller({ reader: reader, story: lesson.story, onNext: function () { runExercise(0); } });
+    cleanup = paced.destroy;
+    s.appendChild(paced.top);
     s.appendChild(reader);
+    s.appendChild(paced.bar);
+    s.appendChild(paced.end);
     s.appendChild(el('div', { class: 'stage-actions' },
       el('button', { type: 'button', class: 'btn primary big', onclick: function () { runExercise(0); } }, 'סיימתי לקרוא ←')));
   }

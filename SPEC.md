@@ -17,7 +17,8 @@ then sends the child a link. The child plays, reads and answers – **no AI, no 
   (`compressToEncodedURIComponent`) → placed in the URL **hash**: `play.html#<data>`.
   The hash is never sent to any server, so no data about the child or lesson is stored anywhere.
 - Vendor LZ-String locally (`js/lz-string.min.js`), do not rely on a CDN.
-- No analytics, no cookies, no tracking. `localStorage` only for teacher conveniences (e.g. last form values).
+- No analytics, no cookies, no tracking. `localStorage` only for conveniences: the teacher's last form values
+  and draft, and the child's last reading pace.
 - Local scripts and CSS are linked with a version query (`js/builder.js?v=2`). Bump the number in `index.html`
   and `play.html` on every release, so browsers do not run an old cached copy.
 - Automated tests: Playwright (Python) suites in `tests/`, run with `python tests/run_all.py`.
@@ -31,6 +32,7 @@ Suggested structure:
 /js/player.js       child flow
 /js/games/*.js      one file per game
 /js/exercises.js
+/js/reading.js      paced reading modes on the child's reading screen
 /js/hebrew.js       nikud helpers (strip, normalize, word matching)
 /js/lesson.js       schema validation, encode/decode link
 /js/lz-string.min.js
@@ -120,6 +122,26 @@ Child can replay a game or press "הלאה".
 - Target words highlighted (background color).
 - Optional: tap a word to hear it (if a Hebrew voice exists).
 - Text size +/- buttons.
+- Three reading modes (`js/reading.js`), chosen with big buttons above the story:
+  - **רגיל** – the story as is (default). No pace or playback controls.
+  - **סימון מתקדם** – the current word is marked (light blue background + outline, distinct from the yellow
+    target-word highlight) and the mark moves on at the chosen pace. If the current word leaves the screen
+    (between the sticky top bar and the playback bar), the page scrolls it to the center
+    (instantly with `prefers-reduced-motion`).
+  - **מילים נעלמות** – words disappear in order from the start of the story (`visibility: hidden`,
+    so the text never moves).
+  - Marks change only background / box-shadow / visibility, never size or spacing, so text sizing keeps working
+    during playback. Works in all nikud modes (words are counted without nikud).
+- **Pace**: words per minute, 20–120. Three big buttons 🐢 🐇 🚀 (30 / 60 / 90) and a slider (step 5),
+  with the value shown ("60 מילים בדקה"). Default 60. The last pace is saved in `localStorage`
+  (`readingApp.pace`); a change applies from the next word.
+- **Timing per word**: base = 60000 / pace ms, times a length factor from the number of letters without nikud:
+  `1 + (letters − 5) × 0.1`, clamped to 0.7–1.6 (a 5-letter word takes exactly the base time).
+  Extra stop after the last word of a sentence (`.` `!` `?` `…` in the text after it): +1 base;
+  after the last word of a paragraph: +2 base (instead of the sentence stop).
+- **Playback controls** (sticky at the bottom of the screen while reading): התחל / עצור, מילה אחורה,
+  מההתחלה. Switching mode stops and resets to the start. At the end of the story playback stops and offers
+  "עוד פעם" (restart) or "הלאה" (to the exercises). Leaving the screen stops the timer.
 
 ### 4.3 Exercises
 Types (rendered one at a time):
