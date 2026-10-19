@@ -465,6 +465,18 @@ Rules:
 - Lessons made before these types simply do not have them; nothing else changed, so old lessons and links
   work as before. A type a player does not know is left out (`unknown`).
 
+### Backward compatibility (`tests/compat.py`)
+- Links in the old format (LZString of the JSON, no `level`, the four first types) play as before, with the
+  same stars.
+- Old drafts (no `level`, a request without question counts) resume; no question-count warnings; a lesson
+  vocalized before is still vocalized: `Review.signature` and the text sent to Dicta are unchanged for lessons
+  without the new types (checked against the code before them).
+- Old settings without question counts get the level's defaults (no level: the default level).
+- An old lesson's print sheet shuffles exactly as before (a snapshot of the old code's order). Only the
+  instructions' spelling changed: בַּסִּיפּוּר, הַמִּילָּה, קוֹדֶם (ktiv male).
+- The review prompt for an old lesson has two more guideline lines (locate sentences, sample answers);
+  everything else in it is the same.
+
 ### Validation (teacher page, before creating link)
 - Valid JSON, all required fields, correct types, `answer` indices in range.
 - Story word count within ±15% of the requested length (show the actual count; warning, not blocking).
