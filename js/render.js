@@ -86,6 +86,41 @@
     return frag;
   }
 
+  var SENTENCE_END = /[.!?…]/;
+
+  // The story as <p> elements of sentences (locate exercise): each sentence is a <span class="sent"> of words.
+  // Returns {node, sentences: [{node, start, end}]}: start/end are word indices in the story (end excluded),
+  // in the order Hebrew.tokenize finds words, the same as Lesson's sentence search.
+  function storySentences(lesson) {
+    var targets = targetsOf(lesson);
+    var frag = document.createDocumentFragment();
+    var sentences = [];
+    var index = 0;
+    lesson.story.split(/\n+/).forEach(function (para) {
+      if (!para.trim()) return;
+      var p = el('p');
+      var cur = null;
+      storyUnits(para).forEach(function (u) {
+        if (u.word === null) { if (u.space) (cur ? cur.node : p).appendChild(document.createTextNode(u.space)); return; }
+        if (!cur) {
+          if (u.space) p.appendChild(document.createTextNode(u.space));
+          cur = { node: el('span', { class: 'sent', role: 'button', tabindex: '0' }), start: index, end: index };
+          p.appendChild(cur.node);
+        } else if (u.space) cur.node.appendChild(document.createTextNode(u.space));
+        var isTarget = H.matchesAny(u.word, targets);
+        cur.node.appendChild(el('span', { class: 'unit' }, u.lead || null,
+          el('span', { class: 'word' + (isTarget ? ' target' : '') }, H.displayText(u.word, lesson.nikudMode, targets)),
+          u.trail || null));
+        index++;
+        cur.end = index;
+        if (SENTENCE_END.test(u.trail)) { sentences.push(cur); cur = null; }
+      });
+      if (cur) sentences.push(cur);
+      frag.appendChild(p);
+    });
+    return { node: frag, sentences: sentences };
+  }
+
   // Sentence with "___" replaced by a blank box (or by the filled word).
   function fillSentence(lesson, sentence, filled, mark) {
     var parts = sentence.split('___');
@@ -99,5 +134,8 @@
     return out;
   }
 
-  window.Render = { targetsOf: targetsOf, text: text, markedText: markedText, storyUnits: storyUnits, story: story, fillSentence: fillSentence };
+  window.Render = {
+    targetsOf: targetsOf, text: text, markedText: markedText, storyUnits: storyUnits, story: story,
+    storySentences: storySentences, fillSentence: fillSentence
+  };
 })();

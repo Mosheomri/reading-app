@@ -479,6 +479,29 @@ body.play.has-nav .read-bar { bottom: var(--nav-h); padding-bottom: 10px; }
 }
 .order-item.locked { border-color: var(--good); background: var(--good-soft); cursor: default; }
 
+/* Open question */
+textarea.open-answer { display: block; max-width: 640px; margin: 0 auto; font-size: 1.2rem; line-height: 1.7; min-height: 110px; }
+.sample-answer { max-width: 640px; margin: 16px auto 0; padding: 12px 16px; text-align: right; border-radius: 14px;
+  background: var(--good-soft); border: 2px solid var(--good); font-size: 1.25rem; line-height: 1.7; }
+.sample-answer .sample-label { font-size: 0.95rem; font-weight: 700; color: #2f6440; }
+
+/* Locate: the story with clickable sentences */
+.locate-story { margin-top: 8px; }
+.locate-story .story { font-size: var(--story-size, 26px); }
+.locate-story .sent { cursor: pointer; border-radius: 8px; padding: 2px 0; box-decoration-break: clone;
+  -webkit-box-decoration-break: clone; transition: background 0.2s; touch-action: manipulation; }
+.locate-story .sent:hover, .locate-story .sent:focus-visible { background: var(--primary-soft); outline: none; }
+.locate-story .sent.tried { background: var(--bad-soft); opacity: 0.6; cursor: default; }
+.locate-story .sent.right { background: var(--good-soft); box-shadow: 0 0 0 2px var(--good); }
+.locate-story .sent.right .word.target { background: transparent; }
+
+/* Message: visible and hidden parts */
+.message-part { max-width: 680px; margin: 0 auto 20px; padding: 12px 0 0; }
+.message-part + .message-part { border-top: 2px dashed var(--line); padding-top: 18px; }
+.message-part .part-title { display: inline-block; padding: 2px 14px; border-radius: 999px; background: var(--primary-soft);
+  color: var(--primary); font-weight: 700; font-size: 1.05rem; }
+.message-part .question { margin-top: 8px; }
+
 /* Finish */
 .stars { font-size: 3.5rem; letter-spacing: 8px; margin: 12px 0; }
 .celebrate { font-size: 5rem; }

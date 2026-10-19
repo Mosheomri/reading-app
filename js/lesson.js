@@ -4,12 +4,18 @@
 
   var H = window.Hebrew;
   var NIKUD_MODES = ['full', 'partial', 'none'];
-  var TYPE_NAMES = { mcq: 'שאלה אמריקאית', tf: 'נכון / לא נכון', fill: 'השלמת מילה', order: 'סידור משפטים' };
+  var TYPE_NAMES = {
+    mcq: 'שאלה אמריקאית', tf: 'נכון / לא נכון', fill: 'השלמת מילה', order: 'סידור משפטים',
+    open: 'שאלה פתוחה', locate: 'איתור מידע', message: 'מסר גלוי וסמוי'
+  };
   var TYPE_ALIASES = {
     mcq: 'mcq', multiple: 'mcq', multiplechoice: 'mcq', choice: 'mcq', question: 'mcq',
     tf: 'tf', truefalse: 'tf', boolean: 'tf',
     fill: 'fill', cloze: 'fill', fillblank: 'fill', blank: 'fill', fillintheblank: 'fill',
-    order: 'order', sequence: 'order', ordering: 'order', sort: 'order'
+    order: 'order', sequence: 'order', ordering: 'order', sort: 'order',
+    open: 'open', openended: 'open', openquestion: 'open', free: 'open',
+    locate: 'locate', find: 'locate', findsentence: 'locate', locateinformation: 'locate',
+    message: 'message', messages: 'message', hiddenmessage: 'message', explicitimplicit: 'message'
   };
 
   /* ---------- Extract JSON from an AI chat response ---------- */
@@ -62,6 +68,14 @@
     return null;
   }
 
+  // A part of a "message" exercise: with options it is a multiple-choice question, else an open one.
+  function coercePart(raw) {
+    raw = raw && typeof raw === 'object' ? raw : {};
+    var options = strList(raw.options).filter(Boolean);
+    if (options.length) return { question: str(raw.question), options: options, answer: toIndex(raw.answer, options) };
+    return { question: str(raw.question), sampleAnswer: str(raw.sampleAnswer || raw.answer) };
+  }
+
   function coerceExercise(raw) {
     raw = raw && typeof raw === 'object' ? raw : {};
     var typeKey = String(raw.type || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -86,6 +100,12 @@
         return { type: 'order', sentences: strList(raw.sentences || raw.items).map(function (s) {
           return s.replace(/^\d+[.)]\s*/, '');
         }) };
+      case 'open':
+        return { type: 'open', question: str(raw.question), sampleAnswer: str(raw.sampleAnswer || raw.answer || raw.sample) };
+      case 'locate':
+        return { type: 'locate', question: str(raw.question), sentence: str(raw.sentence || raw.answer) };
+      case 'message':
+        return { type: 'message', visible: coercePart(raw.visible || raw.explicit), hidden: coercePart(raw.hidden || raw.implicit) };
       default:
         return { type: String(raw.type || ''), unknown: true };
     }
@@ -213,15 +233,28 @@
     return notes;
   }
 
+  // Every text of an exercise (questions, options, answers, sentences), parts of a "message" included.
+  function exerciseTexts(ex) {
+    if (ex.unknown) return [];
+    var texts = [ex.question, ex.statement, ex.sentence, ex.sampleAnswer].concat(ex.options || [], ex.sentences || []);
+    [ex.visible, ex.hidden].forEach(function (part) {
+      if (part) texts = texts.concat([part.question, part.sampleAnswer], part.options || []);
+    });
+    return texts.filter(function (t) { return typeof t === 'string'; });
+  }
+
+  // Does the exercise count for the stars? Open answers are not checked, so they do not count.
+  function counts(ex) {
+    if (ex.type === 'open') return false;
+    if (ex.type === 'message') return !!(ex.visible && ex.visible.options && ex.hidden && ex.hidden.options);
+    return true;
+  }
+
   // Unique Hebrew words with no nikud, across all lesson text.
   function unvocalizedWords(lesson) {
     var texts = [lesson.title, lesson.story];
     lesson.targetWords.forEach(function (t) { texts.push(t.word); });
-    lesson.exercises.forEach(function (ex) {
-      if (ex.unknown) return;
-      texts.push(ex.question, ex.statement, ex.sentence);
-      texts = texts.concat(ex.options || [], ex.sentences || []);
-    });
+    lesson.exercises.forEach(function (ex) { texts = texts.concat(exerciseTexts(ex)); });
     var seen = {};
     var out = [];
     texts.forEach(function (t) {
@@ -318,6 +351,22 @@
         ex.sentences.forEach(function (s) {
           if (s && findSentence(storyBare, s) === -1) warnings.push(label + ': המשפט "' + s + '" לא נמצא בסיפור.');
         });
+      } else if (ex.type === 'open') {
+        if (!ex.question) errors.push(label + ': חסרה שאלה.');
+        if (!ex.sampleAnswer) errors.push(label + ': חסרה תשובה לדוגמה.');
+      } else if (ex.type === 'locate') {
+        if (!ex.question) errors.push(label + ': חסרה שאלה.');
+        if (!ex.sentence) errors.push(label + ': חסר משפט התשובה.');
+        // The child taps the sentence in the story, so it must be there (compared without nikud).
+        else if (findSentence(storyBare, ex.sentence) === -1) errors.push(label + ': משפט התשובה "' + ex.sentence + '" לא נמצא בסיפור.');
+      } else if (ex.type === 'message') {
+        [['visible', 'המסר הגלוי'], ['hidden', 'המסר הסמוי']].forEach(function (k) {
+          var part = ex[k[0]];
+          var partLabel = label + ', ' + k[1];
+          if (!part.question) errors.push(partLabel + ': חסרה שאלה.');
+          if (part.options) checkOptions(partLabel, part, errors, warnings);
+          else if (!part.sampleAnswer) errors.push(partLabel + ': חסרה תשובה לדוגמה.');
+        });
       }
     });
 
@@ -371,6 +420,10 @@
     check: check,
     sortOrderExercises: sortOrderExercises,
     unvocalizedWords: unvocalizedWords,
+    exerciseTexts: exerciseTexts,
+    counts: counts,
+    bareWords: bareWords,
+    findSentence: findSentence,
     fixMessage: fixMessage,
     clean: clean,
     encode: encode,

@@ -341,6 +341,14 @@ Types (rendered one at a time):
 - `tf` – true / false (נכון / לא נכון).
 - `fill` – sentence with a blank, choose the missing word from options.
 - `order` – sentences from the story shuffled; child drags or taps them into order.
+- `open` – the question, a box to write in (not required) and "סיימתי ✓"; then the sample answer, praise and the
+  next question. What the child wrote is kept while the lesson is open (seen again: read only).
+- `locate` – the question and the story, every sentence clickable (`Render.storySentences`). The right sentence
+  (any sentence overlapping the answer) turns green, with praise; a wrong one turns pale red, with a gentle hint.
+- `message` – the visible part first ("המסר הגלוי: מה כתוב בסיפור במפורש?"), then the hidden part ("המסר הסמוי:
+  מה הסיפור מלמד אותנו?"), each as a multiple-choice or an open question. Praise and the next question after both.
+- **Stars** count only exercises with a right answer: open questions, and messages with open parts, do not count
+  (`Lesson.counts`). The summary still counts every question.
 
 **Encouragement** (`js/praise.js`):
 - After a right answer: a praise sentence, picked at random but never the same as the one before, is shown and
@@ -390,7 +398,12 @@ in order, "כבר עניתם נכון ✓"); it takes no clicks and the score do
     { "type": "mcq",  "question": "...", "options": ["...", "...", "..."], "answer": 0 },
     { "type": "tf",   "statement": "...", "answer": true },
     { "type": "fill", "sentence": "הַ___ רָץ בַּגִּנָּה", "options": ["כֶּלֶב", "חָתוּל", "סוּס"], "answer": 0 },
-    { "type": "order", "sentences": ["first", "second", "third"] }
+    { "type": "order", "sentences": ["first", "second", "third"] },
+    { "type": "open", "question": "...", "sampleAnswer": "..." },
+    { "type": "locate", "question": "...", "sentence": "a sentence of the story, as written in it" },
+    { "type": "message",
+      "visible": { "question": "...", "options": ["...", "..."], "answer": 0 },
+      "hidden":  { "question": "...", "sampleAnswer": "..." } }
   ]
 }
 ```
@@ -400,12 +413,27 @@ Rules:
   (by Dicta, step 5). The display mode is applied at render time (section 7). With mode none they may be stored
   without nikud.
 - `order.sentences` is stored in the correct order; the player shuffles.
+- `open`: a question and a sample answer (`sampleAnswer`). There is no right or wrong.
+- `locate`: a question and the sentence of the story that answers it (`sentence`, matched without nikud and
+  punctuation, as the order exercise does).
+- `message`: two parts, `visible` (what the story says) and `hidden` (what it teaches). **A part with
+  `options` is a multiple-choice question** (`question`, `options`, `answer` index); **a part without them is
+  open** (`question`, `sampleAnswer`). The data says which, so a lesson keeps working if its level changes;
+  the level only decides which kind is asked for when the lesson is written: גן–תחילת א׳ and סוף א׳–ב׳ →
+  multiple choice, ג׳–ד׳ and ה׳–ו׳ → open (section 3, step 1).
+- Lessons made before these types simply do not have them; nothing else changed, so old lessons and links
+  work as before. A type a player does not know is left out (`unknown`).
 
 ### Validation (teacher page, before creating link)
 - Valid JSON, all required fields, correct types, `answer` indices in range.
 - Story word count within ±15% of the requested length (show the actual count; warning, not blocking).
 - Every target word appears in the story at least once – compare after stripping nikud, and allow Hebrew prefixes (ו, ה, ב, כ, ל, מ, ש, and combinations like וה, שב).
 - Number of target words matches the request (warning).
+- `open`: question and sample answer required. `locate`: question required; the answer sentence must be found
+  in the story (error: the child could not tap it). `message`: each part needs a question; a multiple-choice
+  part is checked like `mcq` (options, answer in range), an open part needs a sample answer.
+- Accepted spellings from an AI: `open-ended` / `openQuestion` → open, `find` / `find sentence` → locate,
+  `explicit` / `implicit` for the parts, `answer` for `sampleAnswer` / `sentence`, an answer given as the option's text.
 - Nikud is not validated here: it is added in step 5. Messages about nikud are never sent back to the AI.
 
 ---

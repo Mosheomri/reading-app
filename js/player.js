@@ -207,6 +207,7 @@
     // Exercises call hint() only after a wrong try. A wrong try counts even if the child leaves and comes back.
     // A gentle "try again" sentence is shown and heard; the child stays on the question.
     var ectx = Object.assign({}, ctx, {
+      memo: r, // what the child wrote in open questions, kept while the lesson is open
       praise: fb.praise,
       hint: function (detail) {
         r.missed = true;
@@ -233,9 +234,13 @@
 
   function showFinish() {
     setProgress(progress.total);
+    // Open questions (and open-style messages) are not checked, so the stars count the other exercises only.
     var n = lesson.exercises.length;
-    var right = results.filter(function (r) { return r && r.solved && r.firstTry; }).length;
-    var ratio = n ? right / n : 1;
+    var countable = lesson.exercises.filter(L.counts).length;
+    var right = lesson.exercises.filter(function (ex, i) {
+      return L.counts(ex) && results[i] && results[i].solved && results[i].firstTry;
+    }).length;
+    var ratio = countable ? right / countable : 1;
     var stars = ratio >= 0.8 ? 3 : ratio >= 0.5 ? 2 : 1;
     var s = screen();
     s.appendChild(el('div', { class: 'celebrate pop', 'aria-hidden': 'true' }, '🏆'));
