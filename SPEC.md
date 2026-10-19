@@ -67,7 +67,7 @@ Suggested structure:
 |---|---|---|
 | Topic (נושא) | free text | required |
 | Reading level (רמת קריאה) | גן–תחילת א׳ / סוף א׳–ב׳ / ג׳–ד׳ / ה׳–ו׳ | default סוף א׳–ב׳; see below |
-| Story length (אורך) | number of words | e.g. 100; range 20–400 |
+| Story length (אורך) | number of words | e.g. 100; range 20–2000 (`MAX_STORY_WORDS` in `js/builder.js`) |
 | Target words (מילות יעד) | either a number (AI chooses) or a list typed by teacher | 2–10 words |
 | Nikud (ניקוד) | full / partial / none | partial = only target words vocalized |
 
@@ -237,6 +237,13 @@ talks with the teacher page (`js/dicta.js`) through `window.postMessage`.
   the real site.
 
 ### Step 6: Link
+- Link length (measured, `tests/long_story.py`): a 2000-word lesson with full nikud gives a link of about
+  6,500–13,000 characters (more repeated wording compresses better; random text would reach ~16,600). Above
+  8,000 characters (`LONG_LINK`) the link step says so, and advises sending it to yourself first: WhatsApp has no
+  documented URL limit, but very long links are reported to be cut or not clickable on some phones.
+  Long stories need no other change: Dicta's bridge splits the text into parts of up to 5,000 characters
+  (a 2000-word lesson ≈ 10,000 characters, 3 parts; the page waits 30 s + 30 s per part, the script 30 s per
+  part), Gemini streams (no total time limit), and the child page renders 2000 words without delay.
 - Build the link, show it, "העתק קישור" button and "שלח בוואטסאפ" button (`https://wa.me/?text=...`).
 - "פתח לבדיקה" button that opens `play.html` with the lesson.
 - Button to download the lesson JSON (backup) and to load a JSON file back for editing.

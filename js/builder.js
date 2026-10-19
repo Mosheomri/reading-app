@@ -10,6 +10,8 @@
 
   var STORE_SETTINGS = 'readingApp.settings';
   var STORE_DRAFT = 'readingApp.draft';
+  var MAX_STORY_WORDS = 2000;
+  var LONG_LINK = 8000; // characters; above this the link step suggests checking it before sending
 
   var state = {
     step: 1,
@@ -145,7 +147,7 @@
     var f = readForm();
     var errors = [];
     if (!f.topic) errors.push('כתבו נושא לסיפור.');
-    if (!(f.length >= 20 && f.length <= 400)) errors.push('אורך הסיפור צריך להיות בין 20 ל-400 מילים.');
+    if (!(f.length >= 20 && f.length <= MAX_STORY_WORDS)) errors.push('אורך הסיפור צריך להיות בין 20 ל-' + MAX_STORY_WORDS + ' מילים.');
     var words = parseWordList(f.wordListText);
     if (f.wordsMode === 'number' && !(f.wordCount >= 2 && f.wordCount <= 10)) errors.push('מספר מילות היעד צריך להיות בין 2 ל-10.');
     if (f.wordsMode === 'list' && (words.length < 2 || words.length > 10)) errors.push('כתבו בין 2 ל-10 מילות יעד (כתבתם ' + words.length + ').');
@@ -1096,7 +1098,7 @@
     state.link = url.href;
     $('linkBox').textContent = state.link;
     $('linkInfo').textContent = 'אורך הקישור: ' + state.link.length.toLocaleString('he-IL') + ' תווים.' +
-      (state.link.length > 8000 ? ' הקישור ארוך; אם הוא לא נפתח, נסו לקצר את הסיפור.' : '');
+      (state.link.length > LONG_LINK ? ' הקישור ארוך. בוואטסאפ ובמכשירים מסוימים קישור ארוך מאוד עלול להיחתך: שלחו אותו קודם לעצמכם ובדקו שהוא נפתח. אם לא, קצרו את הסיפור.' : '');
     var title = H.stripNikud(lesson.title || 'שיעור קריאה');
     $('waLink').href = 'https://wa.me/?text=' + encodeURIComponent('📖 ' + title + '\n' + state.link);
     $('openLink').href = state.link;
