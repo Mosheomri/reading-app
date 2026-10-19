@@ -6,16 +6,25 @@
 
   // Stable model with a free tier (ai.google.dev/gemini-api/docs/pricing, checked October 2026).
   var MODEL = 'gemini-3.8-flash';
-  // Thinking makes answers slower; 'low' is this model's lowest level (ai.google.dev/gemini-api/docs/thinking).
+  // Used when MODEL stays overloaded (503) after its retries: a lighter stable model, also free tier,
+  // with structured outputs (ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite).
+  var FALLBACK_MODEL = 'gemini-3.5-flash-lite';
+  // Thinking makes answers slower; each model's lowest level (ai.google.dev/gemini-api/docs/thinking):
+  // gemini-3.8-flash has low / medium / high, gemini-3.5-flash-lite also minimal.
   var THINKING_LEVEL = 'low';
+  var FALLBACK_THINKING_LEVEL = 'minimal';
   var API = 'https://generativelanguage.googleapis.com/v1beta/models/';
   var STORE_KEY = 'readingApp.geminiKey';
 
   var config = {
-    timeout: 120000,     // a plain request (checking the key)
-    idleTimeout: 45000,  // a streamed answer: no data at all for this long
-    retryDelay: 4000     // before the one automatic retry after a temporary error
+    timeout: 120000,               // a plain request (checking the key)
+    idleTimeout: 45000,            // a streamed answer: no data at all for this long
+    retryDelay: 4000,              // before the one automatic retry after another temporary error
+    busyDelays: [2000, 5000, 10000] // server overloaded (503): up to 3 more tries, waiting this long before each
   };
+
+  // The model in use: MODEL, until it stays overloaded; then FALLBACK_MODEL until resetModel().
+  var activeModel = MODEL;
 
   /* ---------- Key ---------- */
 
@@ -108,6 +117,7 @@
     blocked: 'Gemini סירב לכתוב את התוכן הזה. נסו לנסח את הנושא אחרת.',
     cut: 'התשובה של Gemini נקטעה באמצע.',
     server: 'יש תקלה זמנית אצל Gemini.',
+    busy: 'השרת של Google עמוס כרגע, גם אחרי כמה ניסיונות ובמודל קל יותר. נסו שוב בעוד כמה דקות.',
     empty: 'Gemini החזיר תשובה ריקה.'
   };
 
@@ -119,6 +129,7 @@
     var e;
     if (status === 429) e = new GeminiError('quota', MESSAGES.quota, status);
     else if (status === 401 || status === 403 || reason === 'API_KEY_INVALID' || /api key/i.test(text)) e = new GeminiError('key', MESSAGES.key, status);
+    else if (status === 503 || err.status === 'UNAVAILABLE') e = new GeminiError('busy', MESSAGES.busy, 503);
     else if (status >= 500) e = new GeminiError('server', MESSAGES.server, status);
     else e = new GeminiError('server', 'Gemini החזיר שגיאה (' + status + (text ? ': ' + text : '') + ').', status);
     // Google's own words, for the console.
@@ -126,7 +137,7 @@
     return e;
   }
 
-  // Worth one automatic retry.
+  // Worth one automatic retry (an overloaded server, 'busy', has its own retries).
   function temporary(e) {
     return e.kind === 'network' || e.kind === 'timeout' || (e.kind === 'server' && e.status >= 500);
   }
@@ -135,7 +146,7 @@
 
   // One line per request in the console: what, how long, HTTP status, error. Never the key.
   function log(info) {
-    var line = '[Gemini] ' + info.call + ' (' + MODEL + '): ' + (info.status ? 'HTTP ' + info.status : 'no response') +
+    var line = '[Gemini] ' + info.call + ' (' + (info.model || MODEL) + '): ' + (info.status ? 'HTTP ' + info.status : 'no response') +
       ', ' + (info.ms / 1000).toFixed(1) + ' s' + (info.chars != null ? ', ' + info.chars + ' chars' : '') +
       (info.finish ? ', finish ' + info.finish : '') + (info.attempt > 1 ? ', retry' : '') +
       (info.error ? ' – ' + info.error : '');
@@ -190,7 +201,8 @@
   // A streamed generateContent (server-sent events). The timer starts again on every piece of data, so an
   // answer that keeps coming is never cut; it fires only after config.idleTimeout with no data at all.
   // onProgress(chars) after every chunk. Resolves with the text.
-  function stream(call, url, key, body, attempt, onProgress) {
+  function stream(call, model, key, body, attempt, onProgress) {
+    var url = API + model + ':streamGenerateContent?alt=sse';
     var t0 = Date.now();
     var status = 0;
     var ctrl = new AbortController();
@@ -251,23 +263,37 @@
       if (blocked || /SAFETY|PROHIBITED|BLOCKLIST|SPII/.test(finish)) throw new GeminiError('blocked', MESSAGES.blocked);
       if (finish === 'MAX_TOKENS') throw new GeminiError('cut', MESSAGES.cut);
       if (!text.trim()) throw new GeminiError('empty', MESSAGES.empty);
-      log({ call: call, status: status, ms: Date.now() - t0, attempt: attempt, chars: text.length, finish: finish || '?' });
+      log({ call: call, model: model, status: status, ms: Date.now() - t0, attempt: attempt, chars: text.length, finish: finish || '?' });
       return text;
     }).catch(function (e) {
       clearTimeout(timer);
       var err = e instanceof GeminiError ? e : networkError(e, true);
-      log({ call: call, status: status, ms: Date.now() - t0, attempt: attempt, chars: text.length, error: logError(e, err) });
+      log({ call: call, model: model, status: status, ms: Date.now() - t0, attempt: attempt, chars: text.length, error: logError(e, err) });
       throw err;
     });
   }
 
-  // One automatic retry after a temporary error. onRetry (optional) is called before it.
+  // Overloaded server (503): up to config.busyDelays.length more tries, waiting longer before each.
+  // Other temporary errors: one more try after config.retryDelay.
+  // onRetry(err, {busy, attempt, of}) is called before each new try (attempt: the coming one; of: the most there can be).
   function withRetry(fn, onRetry) {
-    return fn(1).catch(function (e) {
-      if (!(e instanceof GeminiError) || !temporary(e)) throw e;
-      if (onRetry) onRetry(e);
-      return new Promise(function (r) { setTimeout(r, config.retryDelay); }).then(function () { return fn(2); });
-    });
+    var busyTries = 0;
+    var otherTried = false;
+    var attempt = 1;
+    function run() {
+      return fn(attempt).catch(function (e) {
+        if (!(e instanceof GeminiError)) throw e;
+        var busy = e.kind === 'busy';
+        var wait;
+        if (busy && busyTries < config.busyDelays.length) wait = config.busyDelays[busyTries++];
+        else if (!busy && temporary(e) && !otherTried) { otherTried = true; wait = config.retryDelay; }
+        else throw e;
+        attempt++;
+        if (onRetry) onRetry(e, { busy: busy, attempt: attempt, of: busy ? config.busyDelays.length + 1 : attempt });
+        return new Promise(function (r) { setTimeout(r, wait); }).then(run);
+      });
+    }
+    return run();
   }
 
   // Is the key valid? Reads the model's details (no tokens used). Resolves true or rejects with a GeminiError.
@@ -275,35 +301,55 @@
     return withRetry(function (attempt) { return request('check-key', API + MODEL, key, attempt); }).then(function () { return true; });
   }
 
-  // Sends one prompt, streamed; resolves with the JSON text of the reply (matching `schema`).
-  // opts: {call: name for the console, onRetry(err), onProgress(chars)}
-  function generate(key, prompt, schema, opts) {
-    opts = opts || {};
+  // One model, with its retries.
+  function generateWith(model, key, prompt, schema, opts) {
+    var level = model === FALLBACK_MODEL ? FALLBACK_THINKING_LEVEL : THINKING_LEVEL;
     var body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: schema,
-        thinkingConfig: { thinkingLevel: THINKING_LEVEL }
+        thinkingConfig: { thinkingLevel: level }
       }
     };
-    var url = API + MODEL + ':streamGenerateContent?alt=sse';
+    var call = opts.call || 'generate';
     return withRetry(function (attempt) {
       if (attempt > 1 && opts.onProgress) opts.onProgress(0);
-      return stream(opts.call || 'generate', url, key, body, attempt, opts.onProgress).catch(function (e) {
+      return stream(call, model, key, body, attempt, opts.onProgress).catch(function (e) {
         // If a model ever rejects the thinking setting, send it once more without it (default thinking).
         if (!(e instanceof GeminiError) || e.status !== 400 || !/thinking/i.test(e.detail || '') || !body.generationConfig.thinkingConfig) throw e;
         delete body.generationConfig.thinkingConfig;
-        console.warn('[Gemini] ' + MODEL + ' rejected thinkingLevel "' + THINKING_LEVEL + '"; sending again without it.');
-        return stream(opts.call || 'generate', url, key, body, attempt, opts.onProgress);
+        console.warn('[Gemini] ' + model + ' rejected thinkingLevel "' + level + '"; sending again without it.');
+        return stream(call, model, key, body, attempt, opts.onProgress);
       });
     }, opts.onRetry);
   }
 
+  // Sends one prompt, streamed; resolves with the JSON text of the reply (matching `schema`).
+  // If the model stays overloaded after its retries, switches to FALLBACK_MODEL and stays with it
+  // (for the next calls too) until resetModel().
+  // opts: {call: name for the console, onRetry(err, info), onProgress(chars), onFallback(model)}
+  function generate(key, prompt, schema, opts) {
+    opts = opts || {};
+    var model = activeModel;
+    return generateWith(model, key, prompt, schema, opts).catch(function (e) {
+      if (!(e instanceof GeminiError) || e.kind !== 'busy' || !FALLBACK_MODEL || model === FALLBACK_MODEL) throw e;
+      activeModel = FALLBACK_MODEL;
+      console.warn('[Gemini] ' + model + ' still overloaded (503) after its retries; continuing with ' + FALLBACK_MODEL + '.');
+      if (opts.onFallback) opts.onFallback(FALLBACK_MODEL);
+      if (opts.onProgress) opts.onProgress(0);
+      return generateWith(FALLBACK_MODEL, key, prompt, schema, opts);
+    });
+  }
+
   window.Gemini = {
     MODEL: MODEL,
+    FALLBACK_MODEL: FALLBACK_MODEL,
     THINKING_LEVEL: THINKING_LEVEL,
+    FALLBACK_THINKING_LEVEL: FALLBACK_THINKING_LEVEL,
     config: config,
+    currentModel: function () { return activeModel; },
+    resetModel: function () { activeModel = MODEL; },
     LESSON_SCHEMA: LESSON_SCHEMA,
     REVIEW_SCHEMA: REVIEW_SCHEMA,
     GeminiError: GeminiError,

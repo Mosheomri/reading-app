@@ -69,7 +69,8 @@ class MockApi:
             route.fulfill(status=204, headers=CORS); return
         body = json.loads(req.post_data) if req.post_data else None
         kind = "models" if req.method == "GET" else ("review" if body["generationConfig"]["responseSchema"]["type"] == "ARRAY" else "write")
-        self.log.append({"kind": kind, "url": req.url, "headers": req.headers, "body": body})
+        model = req.url.split("/models/")[1].split(":")[0].split("?")[0]
+        self.log.append({"kind": kind, "model": model, "url": req.url, "headers": req.headers, "body": body})
         if self.hold and kind != "models":
             self.held.append((route, kind)); return
         self.answer(route, kind)
@@ -89,7 +90,7 @@ class MockApi:
         held, self.held = self.held, []
         for route, kind in held: self.answer(route, kind)
 
-    def count(self, kind): return sum(1 for x in self.log if x["kind"] == kind)
+    def count(self, kind, model=None): return sum(1 for x in self.log if x["kind"] == kind and (model is None or x["model"] == model))
 
 def new_context(browser, mock, bridge=False):
     ctx = browser.new_context(viewport={"width": 1300, "height": 900})
@@ -110,7 +111,7 @@ def open_teacher(ctx, key=None, bridge_known=False):
     if key: page.evaluate("(k) => localStorage.setItem('readingApp.geminiKey', k)", key)
     if bridge_known: page.evaluate("localStorage.setItem('readingApp.dictaBridge', '1')")
     page.reload()
-    page.evaluate("Gemini.config.retryDelay = 300")
+    page.evaluate("Gemini.config.retryDelay = 300; Gemini.config.busyDelays = [100, 200, 300]")
     # Record every text a stage line showed (the list is redrawn on each change), to see the progress notes.
     page.evaluate("""() => { window.__stageTexts = [];
       new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => n.textContent && __stageTexts.push(n.textContent.trim()))))
@@ -301,7 +302,7 @@ with sync_playwright() as p:
     failing("invalid key", [api_error(400, "API key not valid.", "API_KEY_INVALID")], "המפתח של Gemini לא תקין", 1)[1].close()
     failing("quota (429)", [api_error(429, "Resource has been exhausted", None, "RESOURCE_EXHAUSTED")], "נגמרה המכסה", 1)[1].close()
     failing("network", ["abort", "abort"], "אין חיבור", 2)[1].close()
-    failing("server error twice", [api_error(503, "overloaded", None, "UNAVAILABLE")] * 2, "תקלה זמנית", 2)[1].close()
+    failing("server error twice (500)", [api_error(500, "internal", None, "INTERNAL")] * 2, "תקלה זמנית", 2)[1].close()
     failing("cut answer", [reply(LESSON_JSON[:200], "MAX_TOKENS")], "נקטעה", 1)[1].close()
     failing("blocked", [("sse", [{"promptFeedback": {"blockReason": "SAFETY"}}])], "סירב", 1)[1].close()
 
@@ -382,7 +383,56 @@ with sync_playwright() as p:
     fill_form(page)
     page.click("#autoCreate")
     wait_stage(page, "review", "done")
-    check(mock.count("write") == 2 and stage_of(page, "write")[1] == "done", "503 then OK: retried once, flow goes on")
+    check(mock.count("write") == 2 and stage_of(page, "write")[1] == "done", "503 then OK: retried, flow goes on")
+    ctx.close()
+
+    # ---------- Overloaded server (503): up to 3 more tries with growing waits, then the fallback model ----------
+    SRC = open(os.path.join(ROOT, "js", "gemini.js"), encoding="utf-8").read()
+    check("busyDelays: [2000, 5000, 10000]" in SRC and "var FALLBACK_MODEL = 'gemini-3.5-flash-lite';" in SRC,
+          "503 waits 2, 5 and 10 s; fallback model in a constant at the top of the file")
+    BUSY = api_error(503, "The model is overloaded. Please try again later.", None, "UNAVAILABLE")
+    FALLBACK = "gemini-3.5-flash-lite"
+
+    mock = MockApi(LESSON_JSON)
+    mock.queue["write"] = [BUSY, BUSY]
+    ctx = new_context(browser, mock)
+    page = open_teacher(ctx, key=KEY)
+    fill_form(page)
+    page.click("#autoCreate")
+    wait_stage(page, "review", "done")
+    texts = page.evaluate("__stageTexts")
+    check(mock.count("write", MODEL) == 3 and mock.count("write", FALLBACK) == 0, "503 twice: third try works, main model only")
+    check(any("השרת של גוגל עמוס, מנסה שוב… (ניסיון 2 מתוך 4)" in t for t in texts) and any("(ניסיון 3 מתוך 4)" in t for t in texts),
+          "the teacher sees 'השרת של גוגל עמוס, מנסה שוב…' with the try number")
+    ctx.close()
+
+    mock = MockApi(LESSON_JSON)
+    mock.queue["write"] = [BUSY] * 4
+    ctx = new_context(browser, mock)
+    page = open_teacher(ctx, key=KEY)
+    fill_form(page)
+    page.click("#autoCreate")
+    wait_stage(page, "review", "done")
+    fb = [x for x in mock.log if x["model"] == FALLBACK]
+    check(mock.count("write", MODEL) == 4 and mock.count("write", FALLBACK) == 1, "503 four times on %s: switched to %s" % (MODEL, FALLBACK))
+    check(fb and fb[0]["body"]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "minimal"}
+          and fb[0]["body"]["generationConfig"]["responseSchema"]["type"] == "OBJECT", "fallback: same structured output, its own lowest thinking level (minimal)")
+    check(mock.count("review", FALLBACK) == 1 and mock.count("review", MODEL) == 0, "the review continues with the fallback model")
+    texts = page.evaluate("__stageTexts")
+    check(any("ממשיכים עם מודל קל יותר (%s)" % FALLBACK in t for t in texts) and "במודל הגיבוי" in stage_of(page, "write")[2],
+          "the teacher sees the switch, and that the story was written with the fallback")
+    check(any("still overloaded (503)" in c and FALLBACK in c for c in console) and any(("write-lesson (%s): HTTP 200" % FALLBACK) in c for c in console),
+          "console: the switch and the fallback's calls, with its name")
+    # The next lesson starts with the main model again
+    before = len(mock.log)
+    page.evaluate("document.getElementById('autoCreate').click()")
+    page.wait_for_timeout(300)
+    new = mock.log[before:]
+    check(new and new[0]["kind"] == "write" and all(x["model"] == MODEL for x in new), "a new lesson starts with the main model again (%s)" % [(x["kind"], x["model"]) for x in new])
+    ctx.close()
+
+    mock, ctx, page = failing("503 on both models", [BUSY] * 8, "השרת של Google עמוס כרגע", 4 + 4)
+    check(mock.count("write", FALLBACK) == 4, "fallback model also tried 4 times before giving up")
     ctx.close()
 
     # If the model rejected the thinking setting (400 about thinking): sent once more without it
@@ -398,16 +448,35 @@ with sync_playwright() as p:
           "thinking setting rejected (400): sent again once without it, flow goes on")
     ctx.close()
 
-    # Review fails: message, manual review offered, the flow goes on to nikud
-    mock = MockApi(LESSON_JSON)
+    # Review fails: clear message with "נסה ביקורת שוב" (top and part 1); the flow still offers nikud
+    mock = MockApi(LESSON_JSON, SUGGESTIONS)
     mock.queue["review"] = [api_error(500, "internal", None, "INTERNAL")] * 2
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
     page.click("#autoCreate")
     wait_stage(page, "nikud", "wait")
-    check(stage_of(page, "review")[1] == "fail" and "יצירת פרומפט ביקורת" in flow_msgs(page) and mock.count("review") == 2,
-          "review error (retried once): message with the manual review, nikud next")
+    m = flow_msgs(page)
+    check(stage_of(page, "review")[1] == "fail" and "בדיקת הטקסט האוטומטית נכשלה" in m and "יצירת פרומפט ביקורת" in m and mock.count("review") == 2,
+          "review error (retried once): clear message with the manual way")
+    check(page.locator("#autoFlowMsgs button:has-text('נסה ביקורת שוב')").count() == 1 and page.locator("#reviewMsgs button:has-text('נסה ביקורת שוב')").count() == 1,
+          "'נסה ביקורת שוב' at the top and next to the review part")
+    page.screenshot(path=os.path.join(OUT, "g4-review-failed.png"), full_page=True)
+    page.locator("#reviewMsgs button:has-text('נסה ביקורת שוב')").click()
+    wait_stage(page, "approve", "wait")
+    check(mock.count("review") == 3 and page.locator("#reviewList .review-item").count() == 2 and stage_of(page, "nikud")[1] == "todo"
+          and "נסה ביקורת שוב" not in flow_msgs(page), "review retried: suggestions shown, nikud waits for the approvals again")
+    ctx.close()
+
+    # Review fails in no-nikud mode: "ready" does not hide the failure and its button
+    mock = MockApi(LESSON_JSON)
+    mock.queue["review"] = [api_error(500, "internal", None, "INTERNAL")] * 2
+    ctx = new_context(browser, mock)
+    page = open_teacher(ctx, key=KEY)
+    fill_form(page, nikud="none")
+    page.click("#autoCreate")
+    page.wait_for_function("() => document.querySelector('#autoFlowMsgs').textContent.includes('מוכן לקישור')", timeout=15000)
+    check("נסה ביקורת שוב" in flow_msgs(page) and "גם בלי בדיקת הטקסט" in flow_msgs(page), "no nikud: ready for a link, review retry still offered")
     ctx.close()
 
     # ---------- Copy-paste still works with a key ----------

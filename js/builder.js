@@ -898,7 +898,8 @@
     var key = G.getKey();
     if (!key) { syncGemini(); return; }
     var run = ++autoRuns;
-    auto = { stages: {}, waitingApproval: false };
+    G.resetModel(); // every new lesson starts with the main model
+    auto = { stages: {}, waitingApproval: false, fallback: false, reviewError: null };
     STAGES.forEach(function (st) { auto.stages[st.id] = { state: '', note: '' }; });
     if (state.settings.nikud === 'none') auto.stages.nikud = { state: 'skip', note: 'בלי ניקוד' };
     $('autoFlow').hidden = false;
@@ -909,7 +910,7 @@
 
     G.writeLesson(key, $('promptText').textContent, streamOpts('write', 'כותב סיפור…', current)).then(function (text) {
       if (!current()) return;
-      stage('write', 'done');
+      stage('write', 'done', auto.fallback ? 'הסיפור נכתב (במודל הגיבוי ' + G.currentModel() + ')' : '');
       stage('check', 'active');
       $('response').value = text; // the answer is there for step 3, as if pasted
       var a = analyzeResponse(text);
@@ -943,13 +944,22 @@
     });
   }
 
-  // Progress while Gemini streams its answer, and the retry note.
+  // Progress while Gemini streams its answer, and the retry / fallback notes.
   function streamOpts(id, label, current) {
     var retrying = false;
     return {
-      onRetry: function () {
+      onRetry: function (e, info) {
         retrying = true;
-        if (current()) stage(id, 'active', 'תקלה זמנית, מנסים שוב…');
+        if (!current()) return;
+        stage(id, 'active', info && info.busy
+          ? 'השרת של גוגל עמוס, מנסה שוב… (ניסיון ' + info.attempt + ' מתוך ' + info.of + ')'
+          : 'תקלה זמנית, מנסים שוב…');
+      },
+      onFallback: function (model) {
+        retrying = true;
+        if (!current()) return;
+        auto.fallback = true;
+        stage(id, 'active', 'השרת של גוגל עמוס; ממשיכים עם מודל קל יותר (' + model + ')…');
       },
       onProgress: function (chars) {
         if (!current() || (!chars && retrying)) return;
@@ -982,11 +992,10 @@
       var n = parseReview();
       if (RV.signature(state.lesson) !== sig) flowMsg(msgBox('info', 'השיעור השתנה בזמן הבדיקה; ייתכן שחלק מההצעות כבר לא מתאימות.'));
       if (n < 0) {
-        stage('review', 'fail', 'לא הצלחתי לקרוא את תשובת הבדיקה');
-        stage('approve', 'skip');
-        readyForNikud(false);
+        reviewFailed(key, run, 'לא הצלחתי לקרוא את התשובה של בדיקת הטקסט.');
         return;
       }
+      auto.reviewError = null;
       stage('review', 'done', n ? 'נמצאו ' + (n === 1 ? 'הצעה אחת' : n + ' הצעות') : 'לא נמצא מה לתקן');
       if (n > 0) {
         auto.waitingApproval = true;
@@ -997,12 +1006,34 @@
       readyForNikud(false);
     }, function (e) {
       if (!current()) return;
-      stage('review', 'fail', 'בדיקת הטקסט לא הצליחה');
-      stage('approve', 'skip');
-      flowMsg(msgBox('warn', ((e && e.message) || 'בדיקת הטקסט האוטומטית לא הצליחה.'),
-        ['אפשר לבדוק ידנית: "יצירת פרומפט ביקורת" בחלק 1, והדבקה לכל צ׳אט. אפשר גם לדלג על הבדיקה.']));
-      readyForNikud(false);
+      reviewFailed(key, run, 'בדיקת הטקסט האוטומטית נכשלה: ' + ((e && e.message) || 'שגיאה לא ידועה.'));
     });
+  }
+
+  // The review did not work: a clear message with "נסה ביקורת שוב", at the top and in part 1.
+  // The flow goes on (nikud is the teacher's turn), without scrolling away from the message.
+  function reviewFailed(key, run, message) {
+    stage('review', 'fail', 'בדיקת הטקסט לא הצליחה');
+    stage('approve', 'skip');
+    auto.reviewError = function () {
+      return el('div', { class: 'review-failed' },
+        msgBox('error', message, ['אפשר לנסות שוב, לבדוק ידנית ("יצירת פרומפט ביקורת" בחלק 1, והדבקה לכל צ׳אט), או לדלג על הבדיקה.']),
+        el('div', { class: 'row' }, actionBtn('↻ נסה ביקורת שוב', function () { retryReview(key, run); }, true)));
+    };
+    flowMsg(auto.reviewError());
+    U.clear($('reviewMsgs')).appendChild(auto.reviewError());
+    readyForNikud(false, true);
+  }
+
+  function retryReview(key, run) {
+    if (!auto || run !== autoRuns) return;
+    auto.reviewError = null;
+    flowMsg(null);
+    U.clear($('reviewMsgs'));
+    U.clear($('reviewList'));
+    stage('approve', '');
+    if (auto.stages.nikud.state === 'wait') stage('nikud', '');
+    autoReview(key, run);
   }
 
   // Called after every approve / reject. The last decision is a click, so Dicta may open in a new window.
@@ -1014,8 +1045,8 @@
     readyForNikud(true);
   }
 
-  // gesture: inside a click, so window.open is allowed.
-  function readyForNikud(gesture) {
+  // gesture: inside a click, so window.open is allowed. stay: do not scroll to the nikud part.
+  function readyForNikud(gesture, stay) {
     if (!auto) return;
     if (!nikudRequired()) { stage('nikud', 'skip', 'בלי ניקוד'); autoFinished(); return; }
     if (nikudDone()) { nikudStageDone(); return; }
@@ -1031,7 +1062,7 @@
     btn.classList.remove('pop');
     void btn.offsetWidth;
     btn.classList.add('pop');
-    $('nikudPart').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (!stay) $('nikudPart').scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
   function nikudStageDone() {
@@ -1048,8 +1079,10 @@
   function autoFinished() {
     if (!auto || auto.waitingApproval) return;
     if (auto.stages.approve.state === 'wait') return;
+    // A failed review keeps its message and retry button above.
     flowMsg(el('div', null,
-      msgBox('ok', 'השיעור מוכן ✓'),
+      auto.reviewError ? auto.reviewError() : null,
+      msgBox('ok', auto.reviewError ? 'השיעור מוכן לקישור, גם בלי בדיקת הטקסט.' : 'השיעור מוכן ✓'),
       el('div', { class: 'row' }, actionBtn('יצירת קישור ←', goToLink, true))));
   }
 

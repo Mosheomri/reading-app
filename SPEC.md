@@ -133,8 +133,20 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   invalid key (400 `API_KEY_INVALID`, 401, 403), quota (429), no network, no data for 45 s, blocked
   (`promptFeedback.blockReason`, safety finish), cut (`MAX_TOKENS`), empty answer, a lesson that fails the checks
   (its problems listed, and "לראות את התשובה ולתקן" opens it in step 3 with the usual fix message).
-  **One automatic retry** (after 4 s) for temporary errors only: network, timeout, 5xx. Not for 429 or a bad key.
-  A review error does not stop the flow: message, manual review offered, then nikud.
+  **Retries**: server overloaded (**503** / `UNAVAILABLE`, also as an error event inside the stream): up to **3
+  more tries**, waiting **2, 5 and 10 s** (`config.busyDelays`); the stage shows "השרת של גוגל עמוס, מנסה שוב…
+  (ניסיון N מתוך 4)". Other temporary errors (network, no data, other 5xx): one more try after 4 s. None for 429
+  or a bad key.
+  **Fallback model**: if the main model is still overloaded after its tries, the call switches to
+  `FALLBACK_MODEL` (a constant at the top of `js/gemini.js`: `gemini-3.5-flash-lite`, stable, free tier,
+  structured outputs and thinking; its lowest thinking level `minimal`, `FALLBACK_THINKING_LEVEL`), with the
+  same retries. The stage shows "ממשיכים עם מודל קל יותר (…)" and the story is marked as written with the
+  fallback. The rest of that run (the review) stays on the fallback; the next "צור שיעור" starts with the main
+  model again (`Gemini.resetModel()`). Both models overloaded: "השרת של Google עמוס כרגע…" and copy-paste.
+  **A review error** does not stop the flow: a clear message with **"↻ נסה ביקורת שוב"** at the top and in the
+  review part (the manual review is offered too). Nikud is offered meanwhile, without scrolling away from the
+  message; a successful retry shows the suggestions and nikud waits for the approvals again. In no-nikud mode
+  "ready for a link" is shown together with the failure and its button.
 - Leaving the flow (new lesson, loading a file, pasting a response, "יצירת פרומפט") cancels it; late answers
   from a cancelled run are ignored.
 - **Tests**: `tests/gemini.py`, against a mock API (Playwright routing).
