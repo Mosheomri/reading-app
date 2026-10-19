@@ -907,9 +907,7 @@
     stage('write', 'active');
     var current = function () { return auto && run === autoRuns; };
 
-    G.writeLesson(key, $('promptText').textContent, function () {
-      if (current()) stage('write', 'active', 'תקלה זמנית, מנסים שוב…');
-    }).then(function (text) {
+    G.writeLesson(key, $('promptText').textContent, streamOpts('write', 'כותב סיפור…', current)).then(function (text) {
       if (!current()) return;
       stage('write', 'done');
       stage('check', 'active');
@@ -945,6 +943,21 @@
     });
   }
 
+  // Progress while Gemini streams its answer, and the retry note.
+  function streamOpts(id, label, current) {
+    var retrying = false;
+    return {
+      onRetry: function () {
+        retrying = true;
+        if (current()) stage(id, 'active', 'תקלה זמנית, מנסים שוב…');
+      },
+      onProgress: function (chars) {
+        if (!current() || (!chars && retrying)) return;
+        stage(id, 'active', label + (chars ? ' (נכתבו כבר ' + chars.toLocaleString('he-IL') + ' תווים)' : ''));
+      }
+    };
+  }
+
   // Stages after a failed one will not run.
   function markRest(afterId) {
     var after = false;
@@ -963,9 +976,7 @@
     var prompt = RV.buildReviewPrompt(state.lesson);
     $('reviewPromptText').textContent = prompt;
     var sig = RV.signature(state.lesson);
-    G.reviewLesson(key, prompt, function () {
-      if (current()) stage('review', 'active', 'תקלה זמנית, מנסים שוב…');
-    }).then(function (text) {
+    G.reviewLesson(key, prompt, streamOpts('review', 'בודק טקסט…', current)).then(function (text) {
       if (!current()) return;
       $('reviewResponse').value = text; // kept in the (closed) paste box, as if pasted
       var n = parseReview();

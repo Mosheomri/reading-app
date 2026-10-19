@@ -6,12 +6,15 @@
 
   // Stable model with a free tier (ai.google.dev/gemini-api/docs/pricing, checked October 2026).
   var MODEL = 'gemini-3.8-flash';
+  // Thinking makes answers slower; 'low' is this model's lowest level (ai.google.dev/gemini-api/docs/thinking).
+  var THINKING_LEVEL = 'low';
   var API = 'https://generativelanguage.googleapis.com/v1beta/models/';
   var STORE_KEY = 'readingApp.geminiKey';
 
   var config = {
-    timeout: 120000,  // one request
-    retryDelay: 4000  // before the one automatic retry after a temporary error
+    timeout: 120000,     // a plain request (checking the key)
+    idleTimeout: 45000,  // a streamed answer: no data at all for this long
+    retryDelay: 4000     // before the one automatic retry after a temporary error
   };
 
   /* ---------- Key ---------- */
@@ -101,6 +104,7 @@
     quota: 'נגמרה המכסה החינמית של Gemini לעכשיו. נסו שוב בעוד כמה דקות (או מחר, אם נגמרה המכסה היומית).',
     network: 'אין חיבור ל-Gemini. בדקו את החיבור לאינטרנט ונסו שוב.',
     timeout: 'Gemini לא ענה בזמן.',
+    idle: 'Gemini הפסיק לשלוח נתונים (45 שניות בלי תשובה).',
     blocked: 'Gemini סירב לכתוב את התוכן הזה. נסו לנסח את הנושא אחרת.',
     cut: 'התשובה של Gemini נקטעה באמצע.',
     server: 'יש תקלה זמנית אצל Gemini.',
@@ -112,12 +116,14 @@
     var reason = '';
     (err.details || []).forEach(function (d) { if (d && d.reason) reason = d.reason; });
     var text = String(err.message || '');
-    if (status === 429) return new GeminiError('quota', MESSAGES.quota, status);
-    if (status === 401 || status === 403 || reason === 'API_KEY_INVALID' || /api key/i.test(text)) {
-      return new GeminiError('key', MESSAGES.key, status);
-    }
-    if (status >= 500) return new GeminiError('server', MESSAGES.server, status);
-    return new GeminiError('server', 'Gemini החזיר שגיאה (' + status + (text ? ': ' + text : '') + ').', status);
+    var e;
+    if (status === 429) e = new GeminiError('quota', MESSAGES.quota, status);
+    else if (status === 401 || status === 403 || reason === 'API_KEY_INVALID' || /api key/i.test(text)) e = new GeminiError('key', MESSAGES.key, status);
+    else if (status >= 500) e = new GeminiError('server', MESSAGES.server, status);
+    else e = new GeminiError('server', 'Gemini החזיר שגיאה (' + status + (text ? ': ' + text : '') + ').', status);
+    // Google's own words, for the console.
+    e.detail = [err.status, reason, text].filter(Boolean).join(' ');
+    return e;
   }
 
   // Worth one automatic retry.
@@ -127,64 +133,176 @@
 
   /* ---------- Requests ---------- */
 
-  function request(method, url, key, body) {
-    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, config.timeout) : null;
-    return fetch(url, {
-      method: method,
-      headers: Object.assign({ 'x-goog-api-key': key }, body ? { 'Content-Type': 'application/json' } : {}),
-      body: body ? JSON.stringify(body) : undefined,
-      signal: ctrl ? ctrl.signal : undefined
-    }).then(function (res) {
+  // One line per request in the console: what, how long, HTTP status, error. Never the key.
+  function log(info) {
+    var line = '[Gemini] ' + info.call + ' (' + MODEL + '): ' + (info.status ? 'HTTP ' + info.status : 'no response') +
+      ', ' + (info.ms / 1000).toFixed(1) + ' s' + (info.chars != null ? ', ' + info.chars + ' chars' : '') +
+      (info.finish ? ', finish ' + info.finish : '') + (info.attempt > 1 ? ', retry' : '') +
+      (info.error ? ' – ' + info.error : '');
+    if (info.error) console.warn(line); else console.info(line);
+  }
+
+  function headers(key, json) {
+    return Object.assign({ 'x-goog-api-key': key }, json ? { 'Content-Type': 'application/json' } : {});
+  }
+
+  function networkError(e, idle) {
+    return e && e.name === 'AbortError' ? new GeminiError('timeout', idle ? MESSAGES.idle : MESSAGES.timeout)
+      : new GeminiError('network', MESSAGES.network);
+  }
+
+  // What went wrong, for the console: the browser's error and our message.
+  function logError(e, err) {
+    return (e && e.message && !(e instanceof GeminiError) ? e.message + ' / ' : '') + err.message +
+      (err.detail ? ' (' + err.detail + ')' : '');
+  }
+
+  function readError(res) {
+    return res.text().then(function (t) {
+      var data = null;
+      try { data = t ? JSON.parse(t) : null; } catch (e) { /* not JSON */ }
+      throw errorFromResponse(res.status, data);
+    });
+  }
+
+  // A plain JSON request (checking the key), with config.timeout.
+  function request(call, url, key, attempt) {
+    var t0 = Date.now();
+    var status = 0;
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, config.timeout);
+    return fetch(url, { method: 'GET', headers: headers(key, false), signal: ctrl.signal }).then(function (res) {
+      status = res.status;
+      if (!res.ok) return readError(res);
+      return res.json().catch(function () { return null; });
+    }).then(function (data) {
       clearTimeout(timer);
-      return res.text().then(function (t) {
-        var data = null;
-        try { data = t ? JSON.parse(t) : null; } catch (e) { /* not JSON */ }
-        if (!res.ok) throw errorFromResponse(res.status, data);
-        return data;
-      });
+      log({ call: call, status: status, ms: Date.now() - t0, attempt: attempt });
+      return data;
     }, function (e) {
       clearTimeout(timer);
-      throw e && e.name === 'AbortError' ? new GeminiError('timeout', MESSAGES.timeout) : new GeminiError('network', MESSAGES.network);
+      var err = e instanceof GeminiError ? e : networkError(e, false);
+      log({ call: call, status: status, ms: Date.now() - t0, attempt: attempt, error: logError(e, err) });
+      throw err;
+    });
+  }
+
+  // A streamed generateContent (server-sent events). The timer starts again on every piece of data, so an
+  // answer that keeps coming is never cut; it fires only after config.idleTimeout with no data at all.
+  // onProgress(chars) after every chunk. Resolves with the text.
+  function stream(call, url, key, body, attempt, onProgress) {
+    var t0 = Date.now();
+    var status = 0;
+    var ctrl = new AbortController();
+    var timer = null;
+    function alive() {
+      clearTimeout(timer);
+      timer = setTimeout(function () { ctrl.abort(); }, config.idleTimeout);
+    }
+    var text = '';
+    var finish = '';
+    var blocked = '';
+    var streamError = null;
+
+    function onEvent(json) {
+      var data;
+      try { data = JSON.parse(json); } catch (e) { return; }
+      if (data.error) { streamError = errorFromResponse(data.error.code || 500, data); return; }
+      if (data.promptFeedback && data.promptFeedback.blockReason) blocked = data.promptFeedback.blockReason;
+      var c = data.candidates && data.candidates[0];
+      if (!c) return;
+      ((c.content && c.content.parts) || []).forEach(function (part) {
+        if (part.text && !part.thought) text += part.text;
+      });
+      if (c.finishReason) finish = c.finishReason;
+      if (onProgress) onProgress(text.length);
+    }
+
+    alive();
+    return fetch(url, { method: 'POST', headers: headers(key, true), body: JSON.stringify(body), signal: ctrl.signal }).then(function (res) {
+      status = res.status;
+      alive();
+      if (!res.ok) return readError(res);
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buf = '';
+      // Events are separated by a blank line; each "data:" line holds one JSON response.
+      function take(done) {
+        var events = buf.split(/\r?\n\r?\n/);
+        buf = done ? '' : events.pop();
+        events.forEach(function (ev) {
+          var lines = ev.split(/\r?\n/).filter(function (l) { return l.indexOf('data:') === 0; });
+          if (lines.length) onEvent(lines.map(function (l) { return l.slice(5).trim(); }).join(''));
+        });
+      }
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) { buf += decoder.decode(); take(true); return; }
+          alive();
+          buf += decoder.decode(r.value, { stream: true });
+          take(false);
+          return pump();
+        });
+      }
+      return pump();
+    }).then(function () {
+      clearTimeout(timer);
+      if (streamError) throw streamError;
+      if (blocked || /SAFETY|PROHIBITED|BLOCKLIST|SPII/.test(finish)) throw new GeminiError('blocked', MESSAGES.blocked);
+      if (finish === 'MAX_TOKENS') throw new GeminiError('cut', MESSAGES.cut);
+      if (!text.trim()) throw new GeminiError('empty', MESSAGES.empty);
+      log({ call: call, status: status, ms: Date.now() - t0, attempt: attempt, chars: text.length, finish: finish || '?' });
+      return text;
+    }).catch(function (e) {
+      clearTimeout(timer);
+      var err = e instanceof GeminiError ? e : networkError(e, true);
+      log({ call: call, status: status, ms: Date.now() - t0, attempt: attempt, chars: text.length, error: logError(e, err) });
+      throw err;
     });
   }
 
   // One automatic retry after a temporary error. onRetry (optional) is called before it.
   function withRetry(fn, onRetry) {
-    return fn().catch(function (e) {
+    return fn(1).catch(function (e) {
       if (!(e instanceof GeminiError) || !temporary(e)) throw e;
       if (onRetry) onRetry(e);
-      return new Promise(function (r) { setTimeout(r, config.retryDelay); }).then(fn);
+      return new Promise(function (r) { setTimeout(r, config.retryDelay); }).then(function () { return fn(2); });
     });
   }
 
   // Is the key valid? Reads the model's details (no tokens used). Resolves true or rejects with a GeminiError.
   function checkKey(key) {
-    return withRetry(function () { return request('GET', API + MODEL, key); }).then(function () { return true; });
+    return withRetry(function (attempt) { return request('check-key', API + MODEL, key, attempt); }).then(function () { return true; });
   }
 
-  // Sends one prompt; resolves with the JSON text of the reply (matching `schema`).
-  function generate(key, prompt, schema, onRetry) {
+  // Sends one prompt, streamed; resolves with the JSON text of the reply (matching `schema`).
+  // opts: {call: name for the console, onRetry(err), onProgress(chars)}
+  function generate(key, prompt, schema, opts) {
+    opts = opts || {};
     var body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', responseSchema: schema }
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: schema,
+        thinkingConfig: { thinkingLevel: THINKING_LEVEL }
+      }
     };
-    return withRetry(function () {
-      return request('POST', API + MODEL + ':generateContent', key, body).then(function (data) {
-        if (data && data.promptFeedback && data.promptFeedback.blockReason) throw new GeminiError('blocked', MESSAGES.blocked);
-        var c = data && data.candidates && data.candidates[0];
-        if (!c) throw new GeminiError('empty', MESSAGES.empty);
-        var text = ((c.content && c.content.parts) || []).map(function (p) { return p.text || ''; }).join('');
-        if (c.finishReason === 'MAX_TOKENS') throw new GeminiError('cut', MESSAGES.cut);
-        if (/SAFETY|PROHIBITED|BLOCKLIST|SPII/.test(c.finishReason || '')) throw new GeminiError('blocked', MESSAGES.blocked);
-        if (!text.trim()) throw new GeminiError('empty', MESSAGES.empty);
-        return text;
+    var url = API + MODEL + ':streamGenerateContent?alt=sse';
+    return withRetry(function (attempt) {
+      if (attempt > 1 && opts.onProgress) opts.onProgress(0);
+      return stream(opts.call || 'generate', url, key, body, attempt, opts.onProgress).catch(function (e) {
+        // If a model ever rejects the thinking setting, send it once more without it (default thinking).
+        if (!(e instanceof GeminiError) || e.status !== 400 || !/thinking/i.test(e.detail || '') || !body.generationConfig.thinkingConfig) throw e;
+        delete body.generationConfig.thinkingConfig;
+        console.warn('[Gemini] ' + MODEL + ' rejected thinkingLevel "' + THINKING_LEVEL + '"; sending again without it.');
+        return stream(opts.call || 'generate', url, key, body, attempt, opts.onProgress);
       });
-    }, onRetry);
+    }, opts.onRetry);
   }
 
   window.Gemini = {
     MODEL: MODEL,
+    THINKING_LEVEL: THINKING_LEVEL,
     config: config,
     LESSON_SCHEMA: LESSON_SCHEMA,
     REVIEW_SCHEMA: REVIEW_SCHEMA,
@@ -194,7 +312,7 @@
     clearKey: clearKey,
     checkKey: checkKey,
     generate: generate,
-    writeLesson: function (key, prompt, onRetry) { return generate(key, prompt, LESSON_SCHEMA, onRetry); },
-    reviewLesson: function (key, prompt, onRetry) { return generate(key, prompt, REVIEW_SCHEMA, onRetry); }
+    writeLesson: function (key, prompt, opts) { return generate(key, prompt, LESSON_SCHEMA, Object.assign({ call: 'write-lesson' }, opts)); },
+    reviewLesson: function (key, prompt, opts) { return generate(key, prompt, REVIEW_SCHEMA, Object.assign({ call: 'review-text' }, opts)); }
   };
 })();

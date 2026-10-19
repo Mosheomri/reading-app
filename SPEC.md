@@ -96,9 +96,21 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   (`readingApp.geminiKey`) only. Instructions page: `gemini-setup.html` (create a key in AI Studio step by step;
   optional: restrict it to the website `mosheomri.github.io/*` and to the Gemini API; privacy note: on the free
   tier Google may use the content, so no identifying details about a child).
-- **API**: `POST https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent` from the
-  browser, key in the `x-goog-api-key` header (never in the URL). `MODEL` is one constant at the top of
-  `js/gemini.js`: `gemini-3.8-flash` (stable, has a free tier; checked in the official pricing and models pages,
+- **API**: `POST https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:streamGenerateContent?alt=sse`
+  from the browser (streamed, server-sent events), key in the `x-goog-api-key` header (never in the URL).
+  The text of every chunk is joined (parts marked `thought` are left out); an `error` event inside the stream
+  counts like an HTTP error. While it streams, the stage shows "כותב סיפור… (נכתבו כבר X תווים)".
+- **Thinking**: `generationConfig.thinkingConfig.thinkingLevel = 'low'`, the lowest level of
+  `gemini-3.8-flash` (it has low / medium / high, default medium; ai.google.dev/gemini-api/docs/thinking),
+  for shorter answers. A constant (`THINKING_LEVEL`) next to `MODEL`. If the API rejects the setting (400
+  mentioning thinking), the request is sent once more without it.
+- **Timeouts**: a streamed answer times out only after **45 s with no data at all** (`config.idleTimeout`; the
+  timer starts again on every chunk, so a long answer that keeps coming is never cut). Plain requests
+  (checking the key): 120 s (`config.timeout`).
+- **Console**: one line per request, `[Gemini] <call> (<model>): HTTP <status>, <seconds> s, <chars> chars,
+  finish <reason>[, retry][ – <error and Google's message>]` (`console.info`, `console.warn` on errors).
+  Calls: `check-key`, `write-lesson`, `review-text`. The key is never logged.
+- **Model and output**: `MODEL` is one constant at the top of `js/gemini.js`: `gemini-3.8-flash` (stable, has a free tier; checked in the official pricing and models pages,
   October 2026). Structured output: `generationConfig.responseMimeType = 'application/json'` and a
   `responseSchema` (OpenAPI subset): the lesson schema mirrors the prompt's example (section 5), with `answer` as
   a string for all exercise types ("0", "true"), which `Lesson.coerce` already accepts; the review schema is the
@@ -118,7 +130,7 @@ check that the text fits the lesson's level, and to report mismatches as `style`
      the manual steps are there. No nikud mode: skipped.
   6. "השיעור מוכן ✓" with a button to the link.
 - **Errors** (clear Hebrew message, the copy-paste flow with the prompt ready in step 2, and "↻ לנסות שוב"):
-  invalid key (400 `API_KEY_INVALID`, 401, 403), quota (429), no network, timeout (120 s), blocked
+  invalid key (400 `API_KEY_INVALID`, 401, 403), quota (429), no network, no data for 45 s, blocked
   (`promptFeedback.blockReason`, safety finish), cut (`MAX_TOKENS`), empty answer, a lesson that fails the checks
   (its problems listed, and "לראות את התשובה ולתקן" opens it in step 3 with the usual fix message).
   **One automatic retry** (after 4 s) for temporary errors only: network, timeout, 5xx. Not for 429 or a bad key.

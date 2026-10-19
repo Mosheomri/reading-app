@@ -23,6 +23,7 @@ def check(cond, msg):
     if not cond: fails.append(msg)
 
 errors = []
+console = []
 CORS = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS"}
 
 def serve_file(route):
@@ -34,8 +35,17 @@ def serve_file(route):
     if full.endswith(".js"): ctype = "application/javascript"
     route.fulfill(status=200, body=open(full, "rb").read(), headers={"Content-Type": ctype + "; charset=utf-8"})
 
-def reply(text, finish="STOP"):
-    return 200, {"candidates": [{"content": {"role": "model", "parts": [{"text": text}]}, "finishReason": finish}]}
+def reply(text, finish="STOP", pieces=4):
+    """A streamed answer (server-sent events): the text in a few chunks, a thought part first (to be skipped)."""
+    n = max(1, len(text) // pieces + 1)
+    events = [{"candidates": [{"content": {"role": "model", "parts": [{"text": "thinking about it", "thought": True}]}}]}]
+    for i in range(0, len(text), n):
+        events.append({"candidates": [{"content": {"role": "model", "parts": [{"text": text[i:i + n]}]}}]})
+    events[-1]["candidates"][0]["finishReason"] = finish
+    return "sse", events
+
+def sse_body(events):
+    return "".join("data: " + json.dumps(e, ensure_ascii=False) + "\r\n\r\n" for e in events)
 
 def api_error(status, message, reason=None, st="INVALID_ARGUMENT"):
     e = {"code": status, "message": message, "status": st}
@@ -50,6 +60,7 @@ class MockApi:
         self.log = []
         self.hold = False
         self.held = []
+        self.hung = []
         self.defaults = {"models": (200, {"name": "models/x"}), "write": reply(lesson_json), "review": reply(review_json)}
 
     def handle(self, route):
@@ -67,7 +78,11 @@ class MockApi:
         r = self.queue[kind].pop(0) if self.queue[kind] else self.defaults[kind]
         if r == "abort":
             route.abort("internetdisconnected"); return
+        if r == "hang":
+            self.hung.append(route); return  # never answers: the idle timeout must fire
         status, data = r
+        if status == "sse":
+            route.fulfill(status=200, body=sse_body(data), headers=dict(CORS, **{"Content-Type": "text/event-stream"})); return
         route.fulfill(status=status, body=json.dumps(data, ensure_ascii=False), headers=dict(CORS, **{"Content-Type": "application/json; charset=utf-8"}))
 
     def release(self):
@@ -84,7 +99,8 @@ def new_context(browser, mock, bridge=False):
     ctx.route(DICTA + "**", lambda r: r.fulfill(status=200, body=MOCK_DICTA, headers={"Content-Type": "text/html; charset=utf-8"}))
     if bridge:
         ctx.add_init_script("if (location.origin === 'https://nakdan.dicta.org.il') {" + SCRIPT + "}")
-    ctx.on("page", lambda pg: pg.on("pageerror", lambda e: errors.append(pg.url[:40] + ": " + str(e))))
+    ctx.on("page", lambda pg: (pg.on("pageerror", lambda e: errors.append(pg.url[:40] + ": " + str(e))),
+                                pg.on("console", lambda m: console.append(m.type + ": " + m.text))))
     return ctx
 
 def open_teacher(ctx, key=None, bridge_known=False):
@@ -95,6 +111,10 @@ def open_teacher(ctx, key=None, bridge_known=False):
     if bridge_known: page.evaluate("localStorage.setItem('readingApp.dictaBridge', '1')")
     page.reload()
     page.evaluate("Gemini.config.retryDelay = 300")
+    # Record every text a stage line showed (the list is redrawn on each change), to see the progress notes.
+    page.evaluate("""() => { window.__stageTexts = [];
+      new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => n.textContent && __stageTexts.push(n.textContent.trim()))))
+        .observe(document.getElementById('autoStages'), { childList: true }); }""")
     return page
 
 def fill_form(page, nikud="full"):
@@ -181,8 +201,9 @@ with sync_playwright() as p:
     page.wait_for_timeout(200)
     w = [x for x in mock.log if x["kind"] == "write"][-1]
     gc = w["body"]["generationConfig"]
-    check(w["url"] == API + "v1beta/models/" + MODEL + ":generateContent" and w["headers"].get("x-goog-api-key") == KEY,
-          "write: POST models/%s:generateContent with the key header" % MODEL)
+    check(w["url"] == API + "v1beta/models/" + MODEL + ":streamGenerateContent?alt=sse" and w["headers"].get("x-goog-api-key") == KEY,
+          "write: POST models/%s:streamGenerateContent?alt=sse (streamed) with the key header" % MODEL)
+    check(gc.get("thinkingConfig") == {"thinkingLevel": "low"}, "write: thinkingConfig.thinkingLevel = low (the lowest for this model)")
     check(gc["responseMimeType"] == "application/json" and gc["responseSchema"]["type"] == "OBJECT"
           and set(gc["responseSchema"]["required"]) == {"title", "topic", "targetWords", "story", "exercises"}
           and gc["responseSchema"]["properties"]["exercises"]["items"]["properties"]["type"]["enum"] == ["mcq", "tf", "fill", "order"],
@@ -190,6 +211,16 @@ with sync_playwright() as p:
     check(w["body"]["contents"][0]["parts"][0]["text"] == page.text_content("#promptText"), "write: the same prompt as copy-paste")
     mock.release()
     wait_stage(page, "review", "active")
+    notes = [t for t in page.evaluate("__stageTexts") if "נכתבו כבר" in t]
+    nums = [int("".join(c for c in t.split("נכתבו כבר")[1] if c.isdigit())) for t in notes]
+    js_len = page.evaluate("document.querySelector('#response').value.length")  # UTF-16 units, as the page counts
+    check(len(nums) >= 3 and nums == sorted(nums) and nums[-1] == js_len and all("כותב סיפור" in t for t in notes),
+          "progress while streaming: 'כותב סיפור… (נכתבו כבר X תווים)', growing to the whole answer (%s)" % nums)
+    check(page.evaluate("JSON.parse(document.querySelector('#response').value).title") == plain["title"] and "thinking about it" not in page.input_value("#response"),
+          "streamed chunks joined into the answer; thought parts left out")
+    logs = [c for c in console if "[Gemini] write-lesson (" + MODEL + "): HTTP 200" in c]
+    check(len(logs) == 1 and " s, " in logs[0] and "%d chars" % js_len in logs[0] and "finish STOP" in logs[0],
+          "console: call, duration, HTTP status, length (%s)" % (logs[0] if logs else console[-3:]))
     check(stage_of(page, "write")[1] == "done" and stage_of(page, "check")[1] == "done" and "בודק טקסט" in stage_of(page, "review")[2],
           "progress: written, checked, 'בודק טקסט…'")
     check(page.is_visible("#step5"), "check step shown while the text is reviewed")
@@ -272,7 +303,67 @@ with sync_playwright() as p:
     failing("network", ["abort", "abort"], "אין חיבור", 2)[1].close()
     failing("server error twice", [api_error(503, "overloaded", None, "UNAVAILABLE")] * 2, "תקלה זמנית", 2)[1].close()
     failing("cut answer", [reply(LESSON_JSON[:200], "MAX_TOKENS")], "נקטעה", 1)[1].close()
-    failing("blocked", [(200, {"promptFeedback": {"blockReason": "SAFETY"}})], "סירב", 1)[1].close()
+    failing("blocked", [("sse", [{"promptFeedback": {"blockReason": "SAFETY"}}])], "סירב", 1)[1].close()
+
+    # No data for the idle time (45 s; shortened here): timeout, retried once, then the message
+    mock = MockApi(LESSON_JSON)
+    mock.queue["write"] = ["hang", "hang"]
+    ctx = new_context(browser, mock)
+    page = open_teacher(ctx, key=KEY)
+    page.evaluate("Gemini.config.idleTimeout = 1500")
+    fill_form(page)
+    page.click("#autoCreate")
+    page.wait_for_function("() => document.querySelector('#autoStages li.fail')", timeout=15000)
+    check("הפסיק לשלוח נתונים" in flow_msgs(page) and mock.count("write") == 2 and "הפרומפט מוכן" in flow_msgs(page),
+          "no data for the idle time: timeout, one retry, message with the copy-paste way")
+    warn = [c for c in console if c.startswith("warning: [Gemini] write-lesson") and "הפסיק לשלוח נתונים" in c]
+    check(len(warn) == 2 and any(", retry" in c for c in warn), "console: both timed-out attempts logged as warnings (%s)" % warn[-1:])
+    check(page.evaluate("Gemini.config.idleTimeout") == 1500 and page.evaluate("Gemini.config.timeout") == 120000, "timeouts: 120 s for plain requests, idle timer for streams")
+    for r in mock.hung:
+        try: r.abort()
+        except Exception: pass
+    ctx.close()
+
+    # A stream that keeps sending data is not cut, however long it takes in total
+    mock = MockApi(LESSON_JSON)
+    ctx = new_context(browser, mock)
+    page = open_teacher(ctx, key=KEY)
+    page.evaluate("Gemini.config.idleTimeout = 800")
+    got = page.evaluate("""async () => {
+      // A fake stream: a chunk every 500 ms for 3 s (longer than the idle time in total, never idle).
+      const realFetch = window.fetch;
+      window.fetch = (url, init) => {
+        const enc = new TextEncoder();
+        let n = 0;
+        const body = new ReadableStream({ pull(ctrl) {
+          return new Promise(r => setTimeout(r, 500)).then(() => {
+            if (n++ === 6) { ctrl.enqueue(enc.encode('data: ' + JSON.stringify({candidates: [{content: {parts: [{text: ']'}]}, finishReason: 'STOP'}]}) + '\\r\\n\\r\\n')); ctrl.close(); return; }
+            ctrl.enqueue(enc.encode('data: ' + JSON.stringify({candidates: [{content: {parts: [{text: n === 1 ? '[1' : ',1'}]}}]}) + '\\r\\n\\r\\n'));
+          });
+        }});
+        return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+      };
+      const seen = [];
+      const t0 = Date.now();
+      const text = await Gemini.generate('k', 'p', Gemini.REVIEW_SCHEMA, { onProgress: c => seen.push(c) });
+      window.fetch = realFetch;
+      return { text, seen, ms: Date.now() - t0 };
+    }""")
+    check(got["text"] == "[1,1,1,1,1,1]" and got["ms"] > 2500 and got["seen"] == sorted(got["seen"]) and len(got["seen"]) == 7,
+          "a slow stream that keeps sending is not cut by the idle timer (%d ms, progress %s)" % (got["ms"], got["seen"]))
+    ctx.close()
+
+    # An error inside the stream (after HTTP 200) counts as a temporary server error: retried once
+    mock = MockApi(LESSON_JSON)
+    mock.queue["write"] = [("sse", [{"error": {"code": 503, "message": "The model is overloaded.", "status": "UNAVAILABLE"}}])]
+    ctx = new_context(browser, mock)
+    page = open_teacher(ctx, key=KEY)
+    fill_form(page)
+    page.click("#autoCreate")
+    wait_stage(page, "review", "done")
+    check(mock.count("write") == 2 and any("UNAVAILABLE The model is overloaded." in c for c in console),
+          "error event inside the stream: retried, Google's message in the console")
+    ctx.close()
 
     # A lesson that fails the checks: message, prompt ready, and the answer can be opened in step 3
     bad = dict(plain); bad["exercises"] = []
@@ -292,6 +383,19 @@ with sync_playwright() as p:
     page.click("#autoCreate")
     wait_stage(page, "review", "done")
     check(mock.count("write") == 2 and stage_of(page, "write")[1] == "done", "503 then OK: retried once, flow goes on")
+    ctx.close()
+
+    # If the model rejected the thinking setting (400 about thinking): sent once more without it
+    mock = MockApi(LESSON_JSON)
+    mock.queue["write"] = [api_error(400, "thinking_level is not supported for this model.")]
+    ctx = new_context(browser, mock)
+    page = open_teacher(ctx, key=KEY)
+    fill_form(page)
+    page.click("#autoCreate")
+    wait_stage(page, "review", "done")
+    bodies = [x["body"]["generationConfig"] for x in mock.log if x["kind"] == "write"]
+    check(len(bodies) == 2 and "thinkingConfig" in bodies[0] and "thinkingConfig" not in bodies[1],
+          "thinking setting rejected (400): sent again once without it, flow goes on")
     ctx.close()
 
     # Review fails: message, manual review offered, the flow goes on to nikud
@@ -329,6 +433,9 @@ with sync_playwright() as p:
     page.screenshot(path=os.path.join(OUT, "g3-setup.png"), full_page=True)
     ctx.close()
 
+    check(any("HTTP 429" in c and "RESOURCE_EXHAUSTED" in c for c in console), "console: HTTP status and Google's error for a failed call")
+    check(any(c.startswith("info: [Gemini] check-key (") for c in console), "console: the key check is logged too")
+    check(not [c for c in console if KEY in c or "bad-key" in c], "the key never appears in the console")
     check(not errors, "no page errors: %s" % errors)
     browser.close()
 
