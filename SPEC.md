@@ -37,8 +37,12 @@ Suggested structure:
 /js/print.js        printable worksheet and answer page
 /js/hebrew.js       nikud helpers (strip, normalize, word matching)
 /js/lesson.js       schema validation, encode/decode link
+/js/dicta.js        automatic nikud: opens Dicta and talks with the userscript
 /js/lz-string.min.js
+/dicta-setup.html   setup instructions for the Dicta bridge (teacher)
+/userscripts/dicta-bridge.user.js   Tampermonkey script that runs on Dicta's site
 ```
+- The Dicta bridge (section 3, step 5) is optional: without the userscript everything works by copy-paste.
 
 ---
 
@@ -107,7 +111,10 @@ check that the text fits the lesson's level, and to report mismatches as `style`
 2. **Nikud with Dicta**: **required** before a link when the nikud mode is full or partial; hidden (and skipped)
    when it is none.
    - Copy all lesson text without nikud (title, target words, story, exercises; one field per line),
-     vocalize it in Dicta Nakdan (modern style, ktiv male), paste the result back.
+     vocalize it in Dicta Nakdan (modern style, ktiv male), paste the result back. Dicta vocalizes as you type
+     (there is no "נקד" button).
+   - Or automatically, with the button "✨ נקד אוטומטית בדיקטה" (section 3.1). The result goes into the paste
+     box and runs the same comparison, so everything below applies to both ways.
    - The pasted text must have the same number of words. Words that have no nikud in the lesson take Dicta's
      word as is, after checking the letters are identical. A lesson without nikud is therefore vocalized with
      no comparison at all.
@@ -117,6 +124,51 @@ check that the text fits the lesson's level, and to report mismatches as `style`
    - The nikud step is tied to the text it was applied to. Any text change afterwards requires Dicta again
      before a link (the progress bar cannot skip it either). The state is kept in the saved draft; a loaded
      lesson file in which every word has nikud counts as vocalized.
+
+#### 3.1 Automatic nikud: the Dicta bridge
+A Tampermonkey userscript, `userscripts/dicta-bridge.user.js`, runs on `https://nakdan.dicta.org.il/*` and
+talks with the teacher page (`js/dicta.js`) through `window.postMessage`.
+- **Script header**: `@match https://nakdan.dicta.org.il/*`, `@updateURL` and `@downloadURL` =
+  `https://mosheomri.github.io/reading-app/userscripts/dicta-bridge.user.js`, so Tampermonkey updates it
+  (bump `@version` on every change). `@grant none`.
+- **Dicta's page** (checked against the live site, October 2026): a Vue app. The text box is
+  `#input-textarea` (maxlength 5000); the vocalized text is shown in `#nikud-text`. Settings are in a menu
+  behind the gear button; its radios (`value="modern"` / `"rabbinic"`, `value="haser"` / `"maleh"`) exist in
+  the DOM only while the menu is open, and the choice is not remembered between visits. All selectors are in
+  the `SEL` block at the top of the script.
+- **Flow**:
+  1. The button opens Dicta with `window.open` (window name `dicta-bridge`, so a second click reuses it).
+  2. The script runs only when the page has a `window.opener`. Once the text box exists it sends
+     `{type: 'ready', version}` every second until a request comes.
+  3. The page sends `{type: 'nikud', id, text}`: the same text as "העתק טקסט בלי ניקוד".
+  4. The script opens the settings menu, picks **מודרני** and **ניקוד בכתיב מלא** (and checks they are
+     selected), closes the menu, sets the text with the native value setter plus `input`/`change` events, and
+     clicks `SEL.nikudButton` if one is set (none today: Dicta vocalizes on input).
+  5. It waits for the result with a `MutationObserver` (plus a 250 ms poll as a backup). The result is
+     accepted when its letters match the text sent (ignoring nikud and ו/י), at least 90% of the Hebrew words
+     have nikud (an update on the way is not taken), and it has not changed for 800 ms. 30 s per part at most.
+  6. Text longer than 5000 characters is split into parts at line ends (a longer line at a space), vocalized
+     one part at a time (`{type: 'progress', part, parts}`), and joined back the same way.
+  7. `{type: 'result', id, text}`, then the script closes the window. The page puts the text into the paste
+     box and runs the manual comparison.
+- **Security**: the page accepts messages only with `origin === 'https://nakdan.dicta.org.il'` and
+  `source ===` the window it opened, and sends only to that origin. The script accepts messages only from its
+  opener and from `https://mosheomri.github.io` or `http://localhost:8000`; it sends `ready` only to those
+  two origins and the rest only to the origin of the request.
+- **Fallback** (the manual steps stay below the button in every case):
+  - no `ready` within 10 s: "the add-on is not installed or not enabled" with a link to `dicta-setup.html`;
+    the Dicta window stays open for manual use;
+  - popup blocked; Dicta window closed before the result; no result in time (30 s + 30 s per 5000
+    characters); an error from the script (element not found, settings not applied, no nikud in time): a
+    clear message and "אפשר לנקד ידנית". On a script error the Dicta window stays open.
+  - If the lesson text changed while Dicta was working, the result is not applied.
+- **Setup page** `dicta-setup.html` (linked "איך מתקינים?" next to the button), in Hebrew, in steps:
+  install Tampermonkey (Chrome Web Store / Edge Add-ons); turn on **Allow User Scripts** in the extension's
+  details (`chrome://extensions` / `edge://extensions`, or developer mode in older versions); click the
+  install link and confirm; try the button. Plus troubleshooting and privacy notes.
+- **Tests**: `tests/dicta_bridge.py` runs the script against `tests/fixtures/dicta-mock.html` served at
+  Dicta's address (Playwright routing, nothing goes to the network). `--live` runs one short check against
+  the real site.
 
 ### Step 6: Link
 - Build the link, show it, "העתק קישור" button and "שלח בוואטסאפ" button (`https://wa.me/?text=...`).

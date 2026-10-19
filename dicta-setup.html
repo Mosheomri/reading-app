@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ניקוד אוטומטי בדיקטה – התקנה</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E📖%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="css/style.css?v=8">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>✨ ניקוד אוטומטי בדיקטה</h1>
+      <p class="muted">התקנה חד־פעמית של תוסף קטן לדפדפן. אחריה, בשלב הניקוד, לוחצים על <strong>"נקד אוטומטית בדיקטה"</strong>:
+        דיקטה נפתחת בחלון חדש, מנקדת את הטקסט, מחזירה אותו לאתר ונסגרת לבד. בלי להעתיק ולהדביק.</p>
+    </header>
+
+    <section class="card">
+      <ol class="setup-steps">
+        <li>
+          <h3>מתקינים את Tampermonkey</h3>
+          <p>Tampermonkey הוא תוסף חינמי ונפוץ שמריץ סקריפטים קטנים באתרים.</p>
+          <ul>
+            <li><strong>כרום:</strong> <a href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank" rel="noopener">Tampermonkey בחנות של כרום</a>, ולוחצים על "הוספה ל-Chrome".</li>
+            <li><strong>אדג׳:</strong> <a href="https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd" target="_blank" rel="noopener">Tampermonkey בחנות של אדג׳</a>, ולוחצים על "קבל".</li>
+          </ul>
+        </li>
+
+        <li>
+          <h3>מאשרים לתוסף להריץ סקריפטים</h3>
+          <p>בגרסאות החדשות של כרום ואדג׳ זה כבוי כברירת מחדל, ובלי זה הסקריפט לא ירוץ.</p>
+          <p><strong>בכרום:</strong></p>
+          <ol>
+            <li>מקלידים בשורת הכתובת <code class="addr">chrome://extensions</code> ולוחצים Enter.</li>
+            <li>בכרטיס של Tampermonkey לוחצים על <strong>"פרטים"</strong>.</li>
+            <li>מדליקים את המתג <strong>"Allow User Scripts"</strong> (בכרום בעברית: המתג של <strong>סקריפטים של משתמשים</strong>).</li>
+            <li>אם אין מתג כזה (גרסה ישנה של כרום): מדליקים במקום זה את <strong>"מצב מפתח"</strong> בפינה של עמוד התוספים.</li>
+          </ol>
+          <p><strong>באדג׳:</strong></p>
+          <ol>
+            <li>מקלידים בשורת הכתובת <code class="addr">edge://extensions</code> ולוחצים Enter.</li>
+            <li>ליד Tampermonkey לוחצים על <strong>"פרטים"</strong> ומדליקים את <strong>"Allow User Scripts"</strong> (סקריפטים של משתמשים).</li>
+            <li>אם אין מתג כזה: מדליקים את <strong>"מצב מפתח"</strong> בתפריט שבצד עמוד התוספים.</li>
+          </ol>
+        </li>
+
+        <li>
+          <h3>מתקינים את הסקריפט</h3>
+          <p><a class="btn primary" id="installLink" href="userscripts/dicta-bridge.user.js">⬇️ התקנת הסקריפט "גשר לדיקטה"</a></p>
+          <p>ייפתח עמוד של Tampermonkey עם פרטי הסקריפט. לוחצים על <strong>"התקנה"</strong> (Install).
+            אם במקום זה מופיע טקסט של קוד, Tampermonkey עוד לא מותקן או לא מופעל: חזרו לשלבים 1–2.</p>
+          <p class="muted small">עדכונים לסקריפט מגיעים לבד דרך Tampermonkey.</p>
+        </li>
+
+        <li>
+          <h3>בודקים שזה עובד</h3>
+          <p>חוזרים לבניית השיעור, ובשלב "בדיקה וניקוד" לוחצים על <strong>"נקד אוטומטית בדיקטה"</strong>.
+            אחרי כמה שניות הניקוד יופיע באתר והחלון של דיקטה ייסגר.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>אם משהו לא עובד</h2>
+      <ul>
+        <li><strong>"נראה שהתוסף לא מותקן":</strong> בדקו את שלב 2 (המתג), ושב-Tampermonkey הסקריפט "גשר לדיקטה" מופעל. אחרי שינוי, סגרו את החלון של דיקטה ונסו שוב.</li>
+        <li><strong>"הדפדפן חסם את פתיחת החלון":</strong> אשרו חלונות קופצים לאתר הזה (בסמל שבצד שורת הכתובת).</li>
+        <li><strong>שגיאה אחרת:</strong> ייתכן שהאתר של דיקטה השתנה. אפשר תמיד לנקד ידנית בהעתקה והדבקה, לפי השלבים באתר.</li>
+      </ul>
+      <h2>פרטיות</h2>
+      <p class="small">הסקריפט פועל רק בנקדן של דיקטה, ורק כשהאתר הזה פתח אותו. הוא מקבל את הטקסט רק מהאתר הזה ומחזיר אותו רק אליו.
+        לדיקטה נשלח בדיוק אותו טקסט שהייתם מדביקים בעצמכם.</p>
+      <p><a href="index.html">→ חזרה לבניית שיעור</a></p>
+    </section>
+  </div>
+</body>
+</html>

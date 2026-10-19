@@ -542,6 +542,7 @@
     U.clear($('reviewList'));
     U.clear($('checkStepMsgs'));
     clearNikudResults();
+    resetAutoNikud();
   }
 
   function clearNikudResults() {
@@ -662,7 +663,68 @@
     return card;
   }
 
-  /* 2. Nikud check */
+  /* 2. Nikud: automatic through Dicta (userscripts/dicta-bridge.user.js), or pasted by hand */
+
+  var DB = window.DictaBridge;
+  var MANUAL = 'אפשר לנקד ידנית לפי השלבים למטה.';
+
+  function autoNikud() {
+    var msgs = U.clear($('autoNikudMsgs'));
+    clearNikudResults();
+    U.clear($('checkStepMsgs'));
+    var btn = $('autoNikud');
+    var sig = RV.signature(state.lesson);
+    var status = el('div', { class: 'msg info', role: 'status' });
+    btn.disabled = true;
+    DB.start(RV.plainText(state.lesson), {
+      status: function (kind, info) {
+        status.textContent = kind === 'opening' ? 'פותחים את דיקטה בחלון חדש…'
+          : 'דיקטה מנקדת את הטקסט…' + (info.parts > 1 ? ' (חלק ' + info.part + ' מתוך ' + info.parts + ')' : '');
+        if (!status.parentNode) msgs.appendChild(status);
+      },
+      result: function (text) {
+        btn.disabled = false;
+        U.clear(msgs);
+        if (RV.signature(state.lesson) !== sig) {
+          msgs.appendChild(msgBox('warn', 'הטקסט השתנה בזמן הניקוד. לחצו שוב על "נקד אוטומטית בדיקטה".'));
+          return;
+        }
+        $('dictaText').value = text;
+        compareNikud();
+      },
+      fail: function (reason, message) {
+        btn.disabled = false;
+        U.clear(msgs).appendChild(autoNikudFailure(reason, message));
+      }
+    });
+  }
+
+  function autoNikudFailure(reason, message) {
+    var help = el('a', { href: 'dicta-setup.html', target: '_blank', rel: 'noopener' }, 'הוראות ההתקנה');
+    if (reason === 'missing') {
+      return msgBox('warn', 'לא התקבלה תשובה מדיקטה: נראה שהתוסף לניקוד אוטומטי לא מותקן או לא מופעל בדפדפן הזה.', [
+        el('span', null, 'להתקנה (פעם אחת) ראו את ', help, '.'),
+        'בינתיים אפשר לנקד ידנית בחלון של דיקטה שנפתח, לפי השלבים למטה.'
+      ]);
+    }
+    var title = {
+      blocked: 'הדפדפן חסם את פתיחת החלון של דיקטה.',
+      closed: 'החלון של דיקטה נסגר לפני שהניקוד הסתיים.',
+      timeout: 'דיקטה לא החזירה ניקוד בזמן.',
+      error: 'הניקוד האוטומטי נכשל' + (message ? ': ' + message : '.')
+    }[reason] || 'הניקוד האוטומטי נכשל.';
+    var items = [];
+    if (reason === 'blocked') items.push('אשרו חלונות קופצים לאתר הזה (בסמל שבצד שורת הכתובת) ונסו שוב.');
+    if (reason === 'error') items.push(el('span', null, 'אם זה חוזר, בדקו ב-Tampermonkey שהסקריפט מעודכן (ראו ', help, ').'));
+    items.push(MANUAL);
+    return msgBox('error', title, items);
+  }
+
+  function resetAutoNikud() {
+    DB.cancel();
+    $('autoNikud').disabled = false;
+    U.clear($('autoNikudMsgs'));
+  }
 
   // Unvocalized words take Dicta's nikud directly; vocalized words that differ are listed for a choice.
   function compareNikud() {
@@ -768,6 +830,7 @@
     $('copyPlain').addEventListener('click', function () {
       copy(RV.plainText(state.lesson), 'הטקסט הועתק בלי ניקוד. עכשיו הדביקו אותו בנקדן של דיקטה.');
     });
+    $('autoNikud').addEventListener('click', autoNikud);
     $('compareNikud').addEventListener('click', compareNikud);
     $('copyLink').addEventListener('click', function () { copy(state.link, 'הקישור הועתק!'); });
     $('downloadJson').addEventListener('click', downloadJson);

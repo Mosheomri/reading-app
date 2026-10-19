@@ -5,7 +5,7 @@ import os, subprocess, sys
 
 sys.stdout.reconfigure(encoding="utf-8")  # Hebrew in the output, also on a cp1252 console
 HERE = os.path.dirname(os.path.abspath(__file__))
-SUITES = ["e2e.py", "e2e_v3.py", "e2e_prompt.py", "e2e_check.py", "e2e_dicta.py", "reading.py", "nav.py", "levels.py", "print.py", "ktiv.py", "match.py"]
+SUITES = ["e2e.py", "e2e_v3.py", "e2e_prompt.py", "e2e_check.py", "e2e_dicta.py", "reading.py", "nav.py", "dicta_bridge.py", "levels.py", "print.py", "ktiv.py", "match.py"]
 
 env = dict(os.environ, PYTHONIOENCODING="utf-8")
 failed = []

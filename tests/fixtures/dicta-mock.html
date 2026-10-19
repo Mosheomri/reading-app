@@ -1,0 +1,81 @@
+<!doctype html>
+<!-- A stand-in for https://nakdan.dicta.org.il, with the same structure as the real page (October 2026):
+     a gear button that opens a menu with the style / spelling radios (only in the DOM while open), a textarea
+     (#input-textarea, maxlength 5000) that vocalizes on "input", and the result in #nikud-text.
+     tests/dicta_bridge.py serves it at Dicta's address and sets window.MOCK_MODE before it runs:
+     normal | slow (result after 3 s) | never (never vocalizes) | nogear (no settings button). -->
+<html lang="he" dir="rtl">
+<head><meta charset="utf-8"><title>mock nakdan</title></head>
+<body>
+<div id="app">
+  <div class="gear-box"><button type="button" class="v-btn v-btn--icon" aria-haspopup="menu" id="gear"><i class="fa-regular fa-gear"></i></button></div>
+  <div id="menuHost"></div>
+  <div class="nikud-overlay-container">
+    <div id="nikud-text" class="nikud-overlay"></div>
+    <textarea id="input-textarea" maxlength="5000" placeholder="הזן טקסט כאן"></textarea>
+  </div>
+</div>
+<script>
+  var MODE = window.MOCK_MODE || 'normal';
+  var settings = { style: 'modern', type: 'haser' }; // Dicta's defaults
+  var MALE_MARK = String.fromCharCode(0x05B8);       // qamats: vocalized as modern + ktiv male
+  var OTHER_MARK = String.fromCharCode(0x05B0);      // sheva: any other setting
+  var NBSP = String.fromCharCode(0xA0);
+  var gear = document.getElementById('gear');
+  var host = document.getElementById('menuHost');
+  var ta = document.getElementById('input-textarea');
+  var out = document.getElementById('nikud-text');
+  if (MODE === 'nogear') gear.parentNode.remove();
+
+  function radio(name, value, label, key) {
+    var id = 'r-' + value;
+    var w = document.createElement('div');
+    w.innerHTML = '<input type="radio" id="' + id + '" name="' + name + '" value="' + value + '"><label for="' + id + '">' + label + '</label>';
+    var r = w.querySelector('input');
+    r.checked = settings[key] === value;
+    r.addEventListener('change', function () { if (r.checked) settings[key] = value; });
+    return w;
+  }
+  function openMenu() {
+    var m = document.createElement('div');
+    m.className = 'v-overlay v-menu';
+    [radio('text-style-group', 'modern', 'מודרני', 'style'), radio('text-style-group', 'rabbinic', 'רבני', 'style'),
+     radio('text-type-group', 'haser', 'ניקוד בכתיב חסר', 'type'), radio('text-type-group', 'maleh', 'ניקוד בכתיב מלא', 'type')]
+      .forEach(function (n) { m.appendChild(n); });
+    host.appendChild(m);
+  }
+  function closeMenu() { host.innerHTML = ''; }
+  gear.addEventListener('click', function () { host.children.length ? closeMenu() : openMenu(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+
+  // Every Hebrew letter gets a mark; with half=true only the first half of the text (an update in progress).
+  function vocalize(text, half) {
+    var mark = settings.style === 'modern' && settings.type === 'maleh' ? MALE_MARK : OTHER_MARK;
+    var stop = half ? Math.floor(text.length / 2) : text.length;
+    var s = '';
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      s += c;
+      if (i < stop && c >= 'א' && c <= 'ת') s += mark;
+    }
+    return s;
+  }
+
+  var timers = [];
+  window.mockRequests = [];
+  ta.addEventListener('input', function () {
+    timers.forEach(clearTimeout);
+    var text = ta.value;
+    out.textContent = text; // the overlay mirrors the typed text until the result comes
+    if (MODE === 'never') return;
+    window.mockRequests.push({ length: text.length, style: settings.style, type: settings.type });
+    if (text.length > 5000) { out.textContent = 'שגיאה'; return; }
+    var full = MODE === 'slow' ? 3000 : 500;
+    timers = [
+      setTimeout(function () { out.textContent = vocalize(text, true) + '\n' + NBSP + '\n'; }, 200),
+      setTimeout(function () { out.textContent = vocalize(text, false) + '\n' + NBSP + '\n'; }, full)
+    ];
+  });
+</script>
+</body>
+</html>

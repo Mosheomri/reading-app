@@ -504,6 +504,24 @@ body.play.has-nav .read-bar { bottom: var(--nav-h); padding-bottom: 10px; }
 .check-part { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; }
 .check-steps { padding-inline-start: 22px; margin: 0 0 12px; }
 .check-steps li { margin-bottom: 8px; }
+.auto-nikud { background: var(--primary-soft); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
+.auto-nikud .msgs { margin-bottom: 0; }
+.msg a { color: inherit; font-weight: 600; }
+
+/* Dicta bridge setup page */
+.setup-steps { padding-inline-start: 0; list-style: none; counter-reset: step; }
+.setup-steps > li { counter-increment: step; position: relative; padding-inline-start: 52px; margin-bottom: 22px; }
+.setup-steps > li::before {
+  content: counter(step);
+  position: absolute; inset-inline-start: 0; top: 0;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--primary); color: #fff; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.setup-steps h3 { margin: 4px 0 8px; }
+.setup-steps ol, .setup-steps ul { padding-inline-start: 22px; margin: 6px 0; }
+.setup-steps li li { margin-bottom: 4px; }
+code.addr { direction: ltr; unicode-bidi: isolate; background: #f6f2ea; border-radius: 6px; padding: 1px 6px; font-size: 0.9em; }
 
 .review-item { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: #fdfcf9; }
 .review-item.accepted { border-color: var(--good); background: var(--good-soft); }
