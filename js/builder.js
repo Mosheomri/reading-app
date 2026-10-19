@@ -349,7 +349,12 @@
   function textInput(value, onChange, attrs) {
     var input = el('input', Object.assign({ type: 'text', value: value, spellcheck: 'true', lang: 'he' }, attrs || {}));
     input.addEventListener('input', function () { onChange(H.normalize(input.value)); changed(); });
-    input.addEventListener('change', function () { onChange(H.normalize(input.value).trim()); changed(); });
+    // A focused field removed by a re-render still fires "change"; by then the lesson may hold a newer value.
+    input.addEventListener('change', function () {
+      if (!input.isConnected) return;
+      onChange(H.normalize(input.value).trim());
+      changed();
+    });
     return input;
   }
 
@@ -407,20 +412,118 @@
     lesson.exercises.forEach(function (ex, i) { root.appendChild(exerciseEditor(ex, i)); });
     root.appendChild(el('div', { class: 'row' },
       el('span', { class: 'muted small' }, 'הוספת תרגיל:'),
-      ['mcq', 'tf', 'fill', 'order'].map(function (type) {
+      window.Levels.TYPES.map(function (t) {
         return el('button', { type: 'button', class: 'btn small', onclick: function () {
-          lesson.exercises.push(newExercise(type)); changed(true);
-        } }, '+ ' + L.TYPE_NAMES[type]);
+          lesson.exercises.push(newExercise(t.id)); changed(true);
+        } }, '+ ' + L.TYPE_NAMES[t.id]);
       })));
 
     refreshPreview();
+  }
+
+  function newPart(style) {
+    return style === 'open' ? { question: '', sampleAnswer: '' } : { question: '', options: ['', '', ''], answer: 0 };
   }
 
   function newExercise(type) {
     if (type === 'mcq') return { type: 'mcq', question: '', options: ['', '', ''], answer: 0 };
     if (type === 'tf') return { type: 'tf', statement: '', answer: true };
     if (type === 'fill') return { type: 'fill', sentence: '___', options: ['', '', ''], answer: 0 };
+    if (type === 'open') return { type: 'open', question: '', sampleAnswer: '' };
+    if (type === 'locate') return { type: 'locate', question: '', sentence: '' };
+    if (type === 'message') {
+      // The parts' kind follows the lesson's level (multiple choice up to ב׳, open from ג׳).
+      var level = window.Levels.get(state.lesson.level);
+      var style = level ? level.messageStyle : 'mcq';
+      return { type: 'message', visible: newPart(style), hidden: newPart(style) };
+    }
     return { type: 'order', sentences: ['', '', '', ''] };
+  }
+
+  // Options with a radio for the right one, for mcq / fill and multiple-choice message parts.
+  function optionsEditor(q) {
+    var opts = el('div', { class: 'field' }, el('span', { class: 'label' }, 'אפשרויות (סמנו את הנכונה)'));
+    var group = 'ans_' + Math.random().toString(36).slice(2, 9);
+    q.options.forEach(function (o, j) {
+      var radio = el('input', { type: 'radio', name: group, checked: q.answer === j, 'aria-label': 'תשובה נכונה' });
+      radio.addEventListener('change', function () { q.answer = j; changed(); });
+      opts.appendChild(el('div', { class: 'opt-row' },
+        radio,
+        textInput(o, function (v) { q.options[j] = v; }),
+        removeBtn('מחיקת אפשרות', function () {
+          q.options.splice(j, 1);
+          if (q.answer === j) q.answer = -1; else if (q.answer > j) q.answer--;
+          changed(true);
+        })));
+    });
+    if (q.options.length < 4) {
+      opts.appendChild(el('button', { type: 'button', class: 'btn small', onclick: function () {
+        q.options.push(''); changed(true);
+      } }, '+ אפשרות'));
+    }
+    return opts;
+  }
+
+  function textArea(value, onChange, rows) {
+    var ta = el('textarea', { rows: rows || 2, value: value || '', spellcheck: 'true', lang: 'he' });
+    ta.addEventListener('input', function () { onChange(H.normalize(ta.value)); changed(); });
+    return ta;
+  }
+
+  function fieldOf(label, input) {
+    return el('div', { class: 'field' }, el('label', null, label), input);
+  }
+
+  // The answer sentence of a locate exercise: typed, or picked from the story's sentences.
+  function locateEditor(box, ex) {
+    var lesson = state.lesson;
+    var status = el('div', { class: 'hint' });
+    var input = textInput(ex.sentence, function (v) { ex.sentence = v; syncStatus(); });
+    var pick = el('select', { 'aria-label': 'בחירת משפט מהסיפור' });
+    function syncStatus() {
+      var found = ex.sentence && L.findSentence(L.bareWords(lesson.story), ex.sentence) !== -1;
+      status.textContent = !ex.sentence ? 'כתבו את המשפט מהסיפור שעונה על השאלה, או בחרו אותו מהרשימה.'
+        : found ? 'המשפט נמצא בסיפור ✓' : '⚠️ המשפט לא נמצא בסיפור. הילד צריך ללחוץ עליו בסיפור, אז הוא חייב להופיע בו.';
+      status.className = 'hint' + (ex.sentence && !found ? ' bad' : '');
+    }
+    pick.appendChild(el('option', { value: '' }, 'בחירה מתוך הסיפור…'));
+    L.sentencesOf(lesson.story).forEach(function (s) { pick.appendChild(el('option', { value: s }, H.stripNikud(s))); });
+    pick.addEventListener('change', function () {
+      if (!pick.value) return;
+      // A field still focused would report its own value after the re-render below; let it do so first.
+      var active = document.activeElement;
+      if (active && active !== pick && active.blur) active.blur();
+      ex.sentence = pick.value;
+      changed(true);
+    });
+    box.appendChild(fieldOf('שאלה', textInput(ex.question, function (v) { ex.question = v; })));
+    box.appendChild(el('div', { class: 'field' }, el('label', null, 'משפט התשובה (מתוך הסיפור)'), input, pick, status));
+    syncStatus();
+  }
+
+  // The two parts of a message, each with a choice between multiple choice and open.
+  function messageEditor(box, ex) {
+    [['visible', 'המסר הגלוי (מה כתוב בסיפור)'], ['hidden', 'המסר הסמוי (מה הסיפור מלמד)']].forEach(function (k) {
+      var part = ex[k[0]];
+      var isMcq = !!part.options;
+      var group = 'style_' + Math.random().toString(36).slice(2, 9);
+      var styles = el('div', { class: 'choices' }, [['mcq', 'אמריקאית'], ['open', 'פתוחה']].map(function (st) {
+        var radio = el('input', { type: 'radio', name: group, checked: (st[0] === 'mcq') === isMcq });
+        radio.addEventListener('change', function () {
+          var q = part.question;
+          var fresh = newPart(st[0]);
+          fresh.question = q;
+          ex[k[0]] = fresh;
+          changed(true);
+        });
+        return el('label', { class: 'choice' }, radio, ' ' + st[1]);
+      }));
+      var pbox = el('div', { class: 'part-edit' }, el('h4', null, k[1]), styles,
+        fieldOf('שאלה', textInput(part.question, function (v) { part.question = v; })));
+      if (isMcq) pbox.appendChild(optionsEditor(part));
+      else pbox.appendChild(fieldOf('תשובה לדוגמה', textArea(part.sampleAnswer, function (v) { part.sampleAnswer = v; })));
+      box.appendChild(pbox);
+    });
   }
 
   function exerciseEditor(ex, i) {
@@ -442,26 +545,14 @@
         textInput(isFill ? ex.sentence : ex.question, function (v) {
           if (isFill) ex.sentence = v.replace(/_{2,}/g, '___'); else ex.question = v;
         })));
-      var opts = el('div', { class: 'field' }, el('span', { class: 'label' }, 'אפשרויות (סמנו את הנכונה)'));
-      var group = 'ans' + i + '_' + Math.random().toString(36).slice(2, 7);
-      ex.options.forEach(function (o, j) {
-        var radio = el('input', { type: 'radio', name: group, checked: ex.answer === j, 'aria-label': 'תשובה נכונה' });
-        radio.addEventListener('change', function () { ex.answer = j; changed(); });
-        opts.appendChild(el('div', { class: 'opt-row' },
-          radio,
-          textInput(o, function (v) { ex.options[j] = v; }),
-          removeBtn('מחיקת אפשרות', function () {
-            ex.options.splice(j, 1);
-            if (ex.answer === j) ex.answer = -1; else if (ex.answer > j) ex.answer--;
-            changed(true);
-          })));
-      });
-      if (ex.options.length < 4) {
-        opts.appendChild(el('button', { type: 'button', class: 'btn small', onclick: function () {
-          ex.options.push(''); changed(true);
-        } }, '+ אפשרות'));
-      }
-      box.appendChild(opts);
+      box.appendChild(optionsEditor(ex));
+    } else if (ex.type === 'open') {
+      box.appendChild(fieldOf('שאלה', textInput(ex.question, function (v) { ex.question = v; })));
+      box.appendChild(fieldOf('תשובה לדוגמה (הילד יראה אותה אחרי שיענה)', textArea(ex.sampleAnswer, function (v) { ex.sampleAnswer = v; })));
+    } else if (ex.type === 'locate') {
+      locateEditor(box, ex);
+    } else if (ex.type === 'message') {
+      messageEditor(box, ex);
     } else if (ex.type === 'tf') {
       box.appendChild(el('div', { class: 'field' },
         el('label', null, 'משפט'),
@@ -577,6 +668,28 @@
     } else if (ex.type === 'order') {
       box.appendChild(el('div', null, num + 'סידור משפטים (הילד יקבל אותם מעורבבים):'));
       box.appendChild(el('ol', null, ex.sentences.map(function (s) { return el('li', null, t(s)); })));
+    } else if (ex.type === 'open') {
+      box.appendChild(el('div', null, num, t(ex.question)));
+      box.appendChild(el('div', { class: 'sample' }, el('span', { class: 'muted' }, 'תשובה לדוגמה: '), t(ex.sampleAnswer)));
+    } else if (ex.type === 'locate') {
+      var found = ex.sentence && L.findSentence(L.bareWords(lesson.story), ex.sentence) !== -1;
+      box.appendChild(el('div', null, num, t(ex.question)));
+      box.appendChild(el('div', { class: found ? 'correct' : 'bad' },
+        el('span', { class: 'muted' }, 'הילד לוחץ בסיפור על: '), t(ex.sentence), found ? ' ✓' : ' ⚠️ לא נמצא בסיפור'));
+    } else if (ex.type === 'message') {
+      box.appendChild(el('div', null, num + 'מסר גלוי ומסר סמוי:'));
+      [['visible', 'גלוי'], ['hidden', 'סמוי']].forEach(function (k) {
+        var part = ex[k[0]];
+        var pb = el('div', { class: 'part' }, el('strong', null, k[1] + ': '), t(part.question));
+        if (part.options) {
+          pb.appendChild(el('ol', null, part.options.map(function (o, j) {
+            return el('li', { class: j === part.answer ? 'correct' : '' }, t(o), j === part.answer ? ' ✓' : '');
+          })));
+        } else {
+          pb.appendChild(el('div', { class: 'sample' }, el('span', { class: 'muted' }, 'תשובה לדוגמה: '), t(part.sampleAnswer)));
+        }
+        box.appendChild(pb);
+      });
     }
     return box;
   }

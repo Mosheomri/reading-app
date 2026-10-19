@@ -42,6 +42,13 @@
 
   var S = { type: 'STRING' };
   var LIST = { type: 'ARRAY', items: S };
+  // A part of a "message" exercise: options + answer (multiple choice) or sampleAnswer (open).
+  var PART = {
+    type: 'OBJECT',
+    properties: { question: S, options: LIST, answer: S, sampleAnswer: S },
+    required: ['question'],
+    propertyOrdering: ['question', 'options', 'answer', 'sampleAnswer']
+  };
 
   // Same shape as the example in js/prompt.js. `answer` is a string for every exercise type;
   // Lesson.coerce turns "0" into 0 and "true" into true.
@@ -65,16 +72,19 @@
         items: {
           type: 'OBJECT',
           properties: {
-            type: { type: 'STRING', enum: ['mcq', 'tf', 'fill', 'order'] },
+            type: { type: 'STRING', enum: ['mcq', 'tf', 'fill', 'order', 'open', 'locate', 'message'] },
             question: S,
             statement: S,
-            sentence: S,
+            sentence: { type: 'STRING', description: 'fill: the sentence with ___. locate: the sentence of the story that answers, word for word.' },
             options: LIST,
             sentences: LIST,
-            answer: { type: 'STRING', description: 'mcq / fill: the number of the right option, the first is "0". tf: "true" or "false". order: empty.' }
+            answer: { type: 'STRING', description: 'mcq / fill: the number of the right option, the first is "0". tf: "true" or "false". Other types: empty.' },
+            sampleAnswer: { type: 'STRING', description: 'open: a short sample answer.' },
+            visible: PART,
+            hidden: PART
           },
           required: ['type'],
-          propertyOrdering: ['type', 'question', 'statement', 'sentence', 'options', 'sentences', 'answer']
+          propertyOrdering: ['type', 'question', 'statement', 'sentence', 'options', 'sentences', 'answer', 'sampleAnswer', 'visible', 'hidden']
         }
       }
     },

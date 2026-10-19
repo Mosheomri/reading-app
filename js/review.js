@@ -34,6 +34,17 @@
       add(base + '.sentence', name + ' – משפט', ex, 'sentence');
       (ex.options || []).forEach(function (o, j) { add(base + '.options[' + j + ']', name + ' – אפשרות ' + (j + 1), ex.options, j); });
       (ex.sentences || []).forEach(function (s, j) { add(base + '.sentences[' + j + ']', name + ' – משפט ' + (j + 1), ex.sentences, j); });
+      add(base + '.sampleAnswer', name + ' – תשובה לדוגמה', ex, 'sampleAnswer');
+      // A "message" has two parts, each a multiple-choice or an open question.
+      [['visible', 'מסר גלוי'], ['hidden', 'מסר סמוי']].forEach(function (k) {
+        var part = ex[k[0]];
+        if (!part) return;
+        var pBase = base + '.' + k[0];
+        var pName = name + ' – ' + k[1];
+        add(pBase + '.question', pName + ', שאלה', part, 'question');
+        (part.options || []).forEach(function (o, j) { add(pBase + '.options[' + j + ']', pName + ', אפשרות ' + (j + 1), part.options, j); });
+        add(pBase + '.sampleAnswer', pName + ', תשובה לדוגמה', part, 'sampleAnswer');
+      });
     });
     return out;
   }
@@ -71,6 +82,8 @@
       '- הטקסטים נשלחים בלי ניקוד. אל תוסיף ניקוד, הוא נבדק בנפרד.',
       '- בדוק שכל מילה כתובה בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר). כל מילה בכתיב חסר היא הצעה מסוג error, עם reason "כתיב חסר".',
       '- בשדה field כתוב את שם השדה מהרשימה, למשל "story" או "exercises[2].question".',
+      '- שדה sentence של תרגיל איתור מידע הוא משפט מתוך הסיפור, והוא חייב להישאר זהה לו. אם אתה מתקן משפט כזה, הצע את אותו תיקון גם בשדה story, ולהפך.',
+      '- בתשובה לדוגמה (sampleAnswer) בדוק שהיא נכונה לפי הסיפור, קצרה, ומתאימה לשאלה.',
       '- בשדה original העתק את הקטע בדיוק כפי שהוא מופיע בטקסט.',
       '- בשדה fix כתוב את הקטע המתוקן, בלי ניקוד.',
       '- בשדה reason כתוב הסבר קצר בעברית.',

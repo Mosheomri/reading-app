@@ -199,7 +199,11 @@ check that the text fits the lesson's level, and to report mismatches as `style`
 
 ### Step 5: Check and nikud
 1. **Text review (optional)**: a prompt for a second AI with all lesson texts **without nikud**, so ktiv haser
-   stands out. The AI returns JSON suggestions `{field, type: error|style, original, fix, reason}` (fix without
+   stands out. The texts are the lesson's slots (`Review.slots`), which include every text of the new types:
+   `exercises[i].sampleAnswer`, a locate `sentence`, and a message's `visible.question` / `.options[j]` /
+   `.sampleAnswer` (same for `hidden`). The prompt adds that a locate sentence must stay identical to the story
+   (a fix to one is suggested for both), and that sample answers must be right and short. The same slots are
+   the text sent to Dicta, so the new texts get nikud like all the others. The AI returns JSON suggestions `{field, type: error|style, original, fix, reason}` (fix without
    nikud); the teacher approves or rejects each one. `original` is matched as whole words, ignoring nikud.
 2. **Nikud with Dicta**: **required** before a link when the nikud mode is full or partial; hidden (and skipped)
    when it is none.
@@ -263,6 +267,15 @@ talks with the teacher page (`js/dicta.js`) through `window.postMessage`.
   Dicta's address (Playwright routing, nothing goes to the network). `--live` runs one short check against
   the real site.
 
+#### Editing the new types (step 4)
+- `open`: question + sample answer. `locate`: question + the answer sentence, typed or picked from a list of
+  the story's sentences (`Lesson.sentencesOf`), with "המשפט נמצא בסיפור ✓" or a warning when it is not in the
+  story (also a blocking check). `message`: both parts, each with a choice "אמריקאית / פתוחה" (switching keeps
+  the question), and its options or sample answer. "+" buttons for all seven types; a new message follows the
+  lesson's level. The preview shows sample answers, the locate sentence (✓ / ⚠️) and both message parts.
+- A field removed by a re-render no longer writes its old value back (`textInput` ignores a `change` from a
+  detached field; the sentence picker blurs the focused field first).
+
 ### Step 6: Link
 - Link length (measured, `tests/long_story.py`): a 2000-word lesson with full nikud gives a link of about
   6,500–13,000 characters (more repeated wording compresses better; random text would reach ~16,600). Above
@@ -282,14 +295,21 @@ talks with the teacher page (`js/dicta.js`) through `window.postMessage`.
     bold and underlined), then the exercises, numbered, each with a short instruction:
     `mcq` – options with a circle to mark; `tf` – "נכון" / "לא נכון" with squares; `fill` – the sentence with a
     blank line and a word bank (dashed frame) of its options; `order` – the sentences shuffled, with a box for
-    the number next to each.
-  - Everything follows the lesson's nikud mode (section 7), including the instructions.
-  - Options, word banks and order sentences are shuffled once with a PRNG seeded from the lesson content
+    the number next to each; `open` – the question and 3 lines to write on; `locate` – the question and
+    "מתחו קו מתחת למשפט בסיפור שעונה על השאלה"; `message` – the two parts, "המסר הגלוי" and "המסר הסמוי"
+    (underlined), each with circles (multiple choice) or 2 lines (open).
+  - Everything follows the lesson's nikud mode (section 7), including the instructions. The instructions are
+    vocalized in ktiv male (בַּסִּיפּוּר, הַמִּילָּה, קוֹדֶם), like Dicta's nikud, so without nikud they are still
+    spelled right.
+  - Options, word banks, order sentences and the options of each multiple-choice message part are shuffled
+    once with a PRNG seeded from the lesson content
     (FNV-1a hash of the lesson JSON + mulberry32), so the same lesson always prints the same sheet and the answer
     page matches it. A shuffle that keeps the original order is retried.
   - A question never splits across pages (`break-inside: avoid`).
   - With the checkbox, a separate page (`break-before: page`) lists the correct answers: the option text, נכון /
-    לא נכון, the missing word, and for `order` each printed sentence with the number that belongs next to it.
+    לא נכון, the missing word, for `order` each printed sentence with the number that belongs next to it, for
+    `open` the sample answer, for `locate` the sentence, and for `message` both parts (the right option or the
+    sample answer). Lessons without the new types print exactly as before (same shuffle).
 
 ---
 

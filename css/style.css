@@ -252,6 +252,13 @@ pre.prompt {
 .preview .ex-preview { background: #fff; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
 .preview .ex-preview ol { margin: 4px 0; padding-inline-start: 22px; }
 .preview .correct { color: var(--good); font-weight: 700; }
+.preview .bad { color: var(--bad); font-weight: 600; }
+.preview .ex-preview .sample { margin: 4px 0; }
+.preview .ex-preview .part { margin: 6px 0 0; padding-inline-start: 10px; border-inline-start: 3px solid var(--line); }
+.ex-item .part-edit { border-top: 1px dashed var(--line); padding-top: 10px; margin-top: 10px; }
+.ex-item .part-edit h4 { margin: 0 0 6px; }
+.field .hint.bad { color: var(--bad); }
+.ex-item select { margin-top: 6px; }
 
 /* ---------- Story text (shared) ---------- */
 .story { line-height: 2; }
@@ -668,6 +675,11 @@ code.addr { direction: ltr; unicode-bidi: isolate; background: #f6f2ea; border-r
 .print-sheet .p-tf { display: flex; gap: 14mm; margin-top: 2mm; padding-inline-start: 6mm; }
 .print-sheet .p-line { display: inline-block; width: 30mm; border-bottom: 2px solid #000; margin: 0 0.5mm; }
 .print-sheet .p-bank { display: inline-flex; flex-wrap: wrap; gap: 3mm 8mm; margin-top: 2mm; padding: 1.5mm 5mm; border: 2px dashed #000; border-radius: 3mm; }
+.print-sheet .p-write { display: block; margin: 3mm 6mm 0 0; }
+.print-sheet .p-wline { display: block; height: 10mm; border-bottom: 1.5px solid #000; }
+.print-sheet .p-part { margin: 3mm 0 0; padding-inline-start: 6mm; }
+.print-sheet .p-part-title { font-weight: 700; text-decoration: underline; text-underline-offset: 0.2em; }
+.print-sheet .p-part-key { list-style: none; margin: 1mm 0 0; padding: 0; }
 .print-sheet .p-answers { break-before: page; page-break-before: always; font-size: 14pt; }
 .print-sheet .p-answers li { margin: 2mm 0; }
 .print-sheet .p-order-key { list-style: none; margin: 1mm 0 0; padding: 0; }

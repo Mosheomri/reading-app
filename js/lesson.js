@@ -210,6 +210,18 @@
     return -1;
   }
 
+  // The sentences of a text, as written (punctuation and nikud kept), paragraph by paragraph.
+  function sentencesOf(text) {
+    var out = [];
+    String(text || '').split(/\n+/).forEach(function (para) {
+      (para.match(/[^.!?…]+[.!?…]+["'״׳]*|[^.!?…]+$/g) || []).forEach(function (s) {
+        s = s.trim();
+        if (bareWords(s).length) out.push(s);
+      });
+    });
+    return out;
+  }
+
   // Sort each order exercise by where its sentences appear in the story.
   // Sentences not found keep their slot. Returns notes about changes made.
   function sortOrderExercises(lesson) {
@@ -433,6 +445,7 @@
     counts: counts,
     bareWords: bareWords,
     findSentence: findSentence,
+    sentencesOf: sentencesOf,
     fixMessage: fixMessage,
     clean: clean,
     encode: encode,

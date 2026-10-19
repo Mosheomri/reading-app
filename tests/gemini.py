@@ -210,7 +210,7 @@ with sync_playwright() as p:
     check(gc.get("thinkingConfig") == {"thinkingLevel": "low"}, "write: thinkingConfig.thinkingLevel = low (the lowest for this model)")
     check(gc["responseMimeType"] == "application/json" and gc["responseSchema"]["type"] == "OBJECT"
           and set(gc["responseSchema"]["required"]) == {"title", "topic", "targetWords", "story", "exercises"}
-          and gc["responseSchema"]["properties"]["exercises"]["items"]["properties"]["type"]["enum"] == ["mcq", "tf", "fill", "order"],
+          and gc["responseSchema"]["properties"]["exercises"]["items"]["properties"]["type"]["enum"] == ["mcq", "tf", "fill", "order", "open", "locate", "message"],
           "write: structured output (application/json + lesson responseSchema)")
     check(w["body"]["contents"][0]["parts"][0]["text"] == page.text_content("#promptText"), "write: the same prompt as copy-paste")
     mock.release()
