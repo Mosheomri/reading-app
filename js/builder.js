@@ -102,8 +102,48 @@
       wordCount: parseInt($('wordCount').value, 10),
       wordListText: $('wordList').value,
       nikud: document.querySelector('input[name="nikud"]:checked').value,
-      level: document.querySelector('input[name="level"]:checked').value
+      level: document.querySelector('input[name="level"]:checked').value,
+      exercises: readExerciseCounts()
     };
+  }
+
+  /* Question types: a checkbox and a count per type (js/levels.js). */
+
+  function exerciseRows() {
+    return window.Levels.TYPES.map(function (t) {
+      var count = el('input', { type: 'number', class: 'narrow', min: 0, max: window.Levels.MAX_PER_TYPE, step: 1,
+        inputmode: 'numeric', 'data-count': t.id, 'aria-label': 'כמה שאלות: ' + t.label });
+      var box = el('input', { type: 'checkbox', 'data-type': t.id });
+      box.addEventListener('change', function () {
+        if (box.checked && !(+count.value > 0)) count.value = window.Levels.exerciseDefaults(currentLevel())[t.id] || 1;
+        if (!box.checked) count.value = 0;
+      });
+      count.addEventListener('input', function () { box.checked = +count.value > 0; });
+      return el('div', { class: 'ex-type', 'data-type': t.id },
+        el('label', { class: 'choice' }, box, ' ' + t.label), count);
+    });
+  }
+
+  function currentLevel() {
+    var lv = document.querySelector('input[name="level"]:checked');
+    return lv ? lv.value : window.Levels.DEFAULT;
+  }
+
+  function setExerciseCounts(counts) {
+    window.Levels.TYPES.forEach(function (t) {
+      var n = Math.max(0, Math.min(window.Levels.MAX_PER_TYPE, parseInt(counts[t.id], 10) || 0));
+      document.querySelector('[data-count="' + t.id + '"]').value = n;
+      document.querySelector('input[data-type="' + t.id + '"]').checked = n > 0;
+    });
+  }
+
+  function readExerciseCounts() {
+    var out = {};
+    window.Levels.TYPES.forEach(function (t) {
+      var v = parseInt(document.querySelector('[data-count="' + t.id + '"]').value, 10);
+      out[t.id] = isFinite(v) ? v : 0;
+    });
+    return out;
   }
 
   // Radio buttons for the reading levels, from js/levels.js. Returns the label elements.
@@ -127,6 +167,8 @@
     if (nk) nk.checked = true;
     var lv = document.querySelector('input[name="level"][value="' + s.level + '"]');
     if (lv) lv.checked = true;
+    // Saved before question types could be chosen: the level's defaults.
+    setExerciseCounts(s.exercises || window.Levels.exerciseDefaults(currentLevel()));
     syncWordsMode();
   }
 
@@ -151,13 +193,21 @@
     var words = parseWordList(f.wordListText);
     if (f.wordsMode === 'number' && !(f.wordCount >= 2 && f.wordCount <= 10)) errors.push('מספר מילות היעד צריך להיות בין 2 ל-10.');
     if (f.wordsMode === 'list' && (words.length < 2 || words.length > 10)) errors.push('כתבו בין 2 ל-10 מילות יעד (כתבתם ' + words.length + ').');
+    var counts = f.exercises;
+    var bad = window.Levels.TYPES.filter(function (t) {
+      var n = counts[t.id];
+      return !(Number.isInteger(n) && n >= 0 && n <= window.Levels.MAX_PER_TYPE);
+    });
+    if (bad.length) errors.push('מספר השאלות מכל סוג צריך להיות בין 0 ל-' + window.Levels.MAX_PER_TYPE + ' (' + bad.map(function (t) { return t.label; }).join(', ') + ').');
+    else if (!window.Levels.TYPES.some(function (t) { return counts[t.id] > 0; })) errors.push('בחרו לפחות סוג שאלות אחד.');
 
     var msgs = U.clear($('settingsMsgs'));
     if (errors.length) { msgs.appendChild(msgBox('error', null, errors)); return false; }
 
     save(STORE_SETTINGS, f);
     state.settings = f;
-    state.request = { topic: f.topic, length: f.length, level: f.level, wordsMode: f.wordsMode, wordCount: f.wordCount, words: words };
+    state.request = { topic: f.topic, length: f.length, level: f.level, wordsMode: f.wordsMode, wordCount: f.wordCount, words: words,
+      exercises: f.exercises };
     $('promptText').textContent = window.buildPrompt(state.request);
     return true;
   }
@@ -1107,7 +1157,12 @@
   /* ---------- Wire up ---------- */
 
   function init() {
-    levelRadios('level', window.Levels.DEFAULT).forEach(function (n) { $('levelChoices').appendChild(n); });
+    // A new level brings its default question counts.
+    levelRadios('level', window.Levels.DEFAULT, function (id) { setExerciseCounts(window.Levels.exerciseDefaults(id)); })
+      .forEach(function (n) { $('levelChoices').appendChild(n); });
+    exerciseRows().forEach(function (n) { $('exTypes').appendChild(n); });
+    setExerciseCounts(window.Levels.exerciseDefaults(window.Levels.DEFAULT));
+    $('exDefaults').addEventListener('click', function () { setExerciseCounts(window.Levels.exerciseDefaults(currentLevel())); });
     fillForm(load(STORE_SETTINGS));
     document.querySelectorAll('input[name="wordsMode"]').forEach(function (r) { r.addEventListener('change', syncWordsMode); });
     $('settingsForm').addEventListener('submit', submitSettings);

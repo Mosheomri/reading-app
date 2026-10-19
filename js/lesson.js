@@ -313,6 +313,15 @@
       }
     }
 
+    // The question types the teacher chose (request.exercises: {type: count}).
+    if (request && request.exercises) {
+      Object.keys(TYPE_NAMES).forEach(function (type) {
+        var asked = request.exercises[type] || 0;
+        var got = lesson.exercises.filter(function (ex) { return ex.type === type; }).length;
+        if (asked !== got) warnings.push(TYPE_NAMES[type] + ': התבקשו ' + asked + ', התקבלו ' + got + '.');
+      });
+    }
+
     var storyWords = H.tokenize(lesson.story).filter(function (s) { return s.isWord; }).map(function (s) { return s.text; });
     var missingWords = targets.filter(function (t) {
       return t && !storyWords.some(function (w) { return H.matchesWord(w, t); });

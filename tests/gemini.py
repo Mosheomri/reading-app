@@ -124,6 +124,9 @@ def fill_form(page, nikud="full"):
     page.check("input[name=wordsMode][value=number]")
     page.fill("#wordCount", str(len(sample["targetWords"])))
     page.check("input[name=nikud][value=%s]" % nikud)
+    # The question types of the sample lesson the mock answers with.
+    page.evaluate("""() => { const c = {mcq: 3, tf: 2, fill: 2, order: 1, open: 0, locate: 0, message: 0};
+      for (const k in c) { const i = document.querySelector('[data-count="' + k + '"]'); i.value = c[k]; i.dispatchEvent(new Event('input')); } }""")
 
 def stages(page):
     return page.eval_on_selector_all("#autoStages li", "els => els.map(e => [e.dataset.stage, e.className, e.textContent.trim()])")

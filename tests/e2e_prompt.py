@@ -29,6 +29,9 @@ with sync_playwright() as p:
     # Prompt contents
     page.fill("#topic", "כלב בגינה")
     page.fill("#length", "55")
+    # The question types of the sample lesson (pasted below), so the counts match.
+    page.evaluate("""() => { const c = {mcq: 3, tf: 2, fill: 2, order: 1, open: 0, locate: 0, message: 0};
+      for (const k in c) { const i = document.querySelector('[data-count="' + k + '"]'); i.value = c[k]; i.dispatchEvent(new Event('input')); } }""")
     page.click("button[type=submit]")
     prompt = page.text_content("#promptText")
     check("בתוך בלוק קוד אחד (```json)" in prompt, "prompt asks for a ```json code block")

@@ -132,6 +132,13 @@ input.narrow { width: 7em; }
 .choice:has(input:checked) { border-color: var(--primary); background: var(--primary-soft); }
 .choice input { accent-color: var(--primary); }
 
+/* Question types (settings) */
+.ex-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px 16px; }
+.ex-type { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ex-type .choice { flex: 1 1 auto; }
+.ex-type input[type="number"] { width: 4.5em; text-align: center; }
+.link-btn { border: none; background: none; padding: 0; color: var(--primary); text-decoration: underline; cursor: pointer; font-size: inherit; }
+
 /* Steps header */
 .steps {
   display: flex;

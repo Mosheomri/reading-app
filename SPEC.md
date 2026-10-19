@@ -76,6 +76,27 @@ Suggested structure:
 | Story length (אורך) | number of words | e.g. 100; range 20–2000 (`MAX_STORY_WORDS` in `js/builder.js`) |
 | Target words (מילות יעד) | either a number (AI chooses) or a list typed by teacher | 2–10 words |
 | Nikud (ניקוד) | full / partial / none | partial = only target words vocalized |
+| Question types (סוגי שאלות) | a checkbox and a count (0–5) per type | defaults per level; at least one type |
+
+#### Question types
+- Seven rows, in this order (also the order asked for in the prompt): אמריקאית, נכון / לא נכון, השלמה, סידור,
+  פתוחה, איתור מידע, מסר גלוי וסמוי (`Levels.TYPES`). Count 0 = not included; unchecking sets 0, checking
+  gives the level's count (or 1).
+- Defaults per level, in `js/levels.js` (`exercises`), applied when the level changes and by "חזרה לברירת
+  המחדל":
+
+  | level | mcq | tf | fill | order | open | locate | message | message parts |
+  |---|---|---|---|---|---|---|---|---|
+  | גן–תחילת א׳ | 3 | 2 | 1 | 1 | 0 | 1 | 0 | multiple choice |
+  | סוף א׳–ב׳ | 3 | 2 | 2 | 1 | 0 | 1 | 1 | multiple choice |
+  | ג׳–ד׳ | 3 | 1 | 2 | 1 | 1 | 1 | 1 | open |
+  | ה׳–ו׳ | 3 | 1 | 1 | 1 | 2 | 1 | 1 | open |
+
+- Saved with the other settings; settings saved before this field get the level's defaults.
+- The prompt lists only the chosen types with their counts, and its JSON example shows one exercise of each
+  chosen type (the message example in the level's style). The "answer = option number" line only when some
+  type has options. The request keeps the counts; `Lesson.check` warns per type when the answer has a
+  different number (old drafts have no counts: no warning).
 
 #### Reading levels – `js/levels.js`
 All level settings live in one file, so they are easy to tune. Each level has an id (stored in the lesson
