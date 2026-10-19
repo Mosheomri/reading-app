@@ -6,16 +6,17 @@
   var U = window.Util;
   var R = window.Render;
   var L = window.Lesson;
+  var P = window.Praise;
   var el = U.el;
 
   var GAME_ORDER = ['memory', 'build', 'listen'];
-  var PRAISE = ['כל הכבוד! 🌟', 'יופי! 👏', 'מצוין! ⭐', 'נהדר! 🎉', 'איזה יופי! 💫'];
 
   var stage = document.getElementById('stage');
   var progressFill = document.getElementById('progressFill');
   var navBar = document.getElementById('nav');
   var navPrev = document.getElementById('navPrev');
   var navNext = document.getElementById('navNext');
+  var muteBtn = document.getElementById('muteBtn');
 
   var lesson = null;
   var ctx = null;
@@ -28,8 +29,6 @@
   var screenId = 0;   // bumped on every screen, so callbacks from a screen already left are ignored
   var cleanup = null; // stops whatever the current screen runs (paced reading timer)
 
-  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
   function setProgress(done) {
     progress.done = done;
     var pct = Math.round(100 * Math.min(1, done / progress.total));
@@ -39,6 +38,7 @@
 
   function screen() {
     if (cleanup) { cleanup(); cleanup = null; }
+    P.stop(); // a sound from the screen left (and its automatic move on) ends here
     screenId++;
     U.clear(stage);
     window.scrollTo(0, 0);
@@ -84,7 +84,7 @@
     var fb = el('div', { class: 'feedback', role: 'status' });
     return {
       node: fb,
-      praise: function (text) { fb.className = 'feedback good'; fb.textContent = text || pick(PRAISE); },
+      praise: function (text) { fb.className = 'feedback good'; fb.textContent = text || P.next('praise').text; },
       hint: function (text) { fb.className = 'feedback'; fb.textContent = text; },
       clear: function () { fb.className = 'feedback'; fb.textContent = ''; }
     };
@@ -148,7 +148,12 @@
     s.appendChild(fb.node);
     s.appendChild(el('div', { class: 'stage-actions' }, againBtn));
 
-    var gctx = Object.assign({}, ctx, { praise: fb.praise, hint: fb.hint });
+    // A game may speak a word after a delay; once its screen is left, it stays quiet.
+    var gctx = Object.assign({}, ctx, {
+      praise: fb.praise,
+      hint: fb.hint,
+      speak: function (w) { if (id === screenId) return ctx.speak(w); }
+    });
     game.play(area, gctx, function () {
       if (id !== screenId) return;
       setProgress(i + 1);
@@ -200,17 +205,28 @@
     s.appendChild(fb.node);
 
     // Exercises call hint() only after a wrong try. A wrong try counts even if the child leaves and comes back.
+    // A gentle "try again" sentence is shown and heard; the child stays on the question.
     var ectx = Object.assign({}, ctx, {
       praise: fb.praise,
-      hint: function (text) { r.missed = true; if (id === screenId) fb.hint(text); }
+      hint: function (detail) {
+        r.missed = true;
+        if (id !== screenId) return;
+        var item = P.next('try');
+        fb.hint(item.text + ' ' + (detail || 'אפשר להציץ בסיפור.'));
+        P.play(item);
+      }
     });
+    // Right: a praise sentence is shown and heard, then the next screen comes by itself
+    // (after the sound, or 2 s with no sound). "הבא" before that moves on at once and cancels it.
     window.Exercises.render(area, exercises[i], lesson, ectx, function (firstTry) {
       if (id !== screenId || r.solved) return;
       r.solved = true;
       r.firstTry = firstTry && !r.missed;
       setProgress(base + i + 1);
-      fb.praise();
+      var item = P.next('praise');
+      fb.praise(item.text);
       nudgeNext();
+      P.play(item).then(function () { if (id === screenId) go(at + 1); });
     }, r.solved);
     if (r.solved) fb.praise('כבר עניתם נכון ✓');
   }
@@ -246,6 +262,7 @@
     document.title = (R.text(lesson, lesson.title) || 'שיעור קריאה');
 
     U.speechReady().then(function (hasVoice) {
+      P.setVoice(hasVoice);
       ctx = {
         lesson: lesson,
         targets: lesson.targetWords,
@@ -259,6 +276,18 @@
       showStart();
     });
   }
+
+  /* ---------- Sound on / off (every screen; remembered on this device) ---------- */
+
+  function syncMute() {
+    var off = P.muted();
+    muteBtn.textContent = off ? '🔇' : '🔊';
+    muteBtn.setAttribute('aria-pressed', String(off));
+    muteBtn.setAttribute('aria-label', off ? 'הפעלת הקול' : 'השתקת הקול');
+    muteBtn.title = off ? 'הקול כבוי' : 'הקול פועל';
+  }
+  muteBtn.addEventListener('click', function () { P.setMuted(!P.muted()); syncMute(); });
+  syncMute();
 
   window.addEventListener('hashchange', start);
   start();

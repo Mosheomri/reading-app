@@ -127,7 +127,8 @@ with sync_playwright() as p:
 
     # ---------- Child flow ----------
     child = browser.new_page(viewport={"width": 390, "height": 844})
-    child.on("console", lambda m: m.type == "error" and errors.append("child: " + m.text))
+    # A recording not added yet (assets/audio/) is a 404 by design: the page then uses the voice or text.
+    child.on("console", lambda m: m.type == "error" and "/assets/audio/" not in (m.location or {}).get("url", "") and errors.append("child: " + m.text))
     child.on("pageerror", lambda e: errors.append("child: " + str(e)))
     external = []
     child.on("request", lambda req: (not req.url.startswith(BASE)) and external.append(req.url))

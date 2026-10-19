@@ -110,15 +110,28 @@
     return voicePromise;
   }
 
+  // Speaks the text; resolves when it ends (or fails). Some browsers never fire "end", so it also resolves
+  // after a generous time for the text's length.
   function speak(text) {
-    if (!voice) return;
+    if (!voice) return Promise.resolve(false);
     var synth = window.speechSynthesis;
     synth.cancel();
     var u = new SpeechSynthesisUtterance(text);
     u.voice = voice;
     u.lang = voice.lang || 'he-IL';
     u.rate = 0.8;
-    synth.speak(u);
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish(ok) { if (!done) { done = true; clearTimeout(t); resolve(ok); } }
+      var t = setTimeout(function () { finish(true); }, 1500 + String(text).length * 150);
+      u.onend = function () { finish(true); };
+      u.onerror = function () { finish(false); };
+      synth.speak(u);
+    });
+  }
+
+  function stopSpeaking() {
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   }
 
   window.Util = {
@@ -128,6 +141,7 @@
     shuffleChanged: shuffleChanged,
     copyText: copyText,
     speechReady: speechReady,
-    speak: speak
+    speak: speak,
+    stopSpeaking: stopSpeaking
   };
 })();

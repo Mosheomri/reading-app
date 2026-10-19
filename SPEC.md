@@ -37,6 +37,7 @@ Suggested structure:
 /js/player.js       child flow
 /js/games/*.js      one file per game
 /js/exercises.js
+/js/praise.js       encouragement sentences, their sound (recording / voice / text), mute
 /js/reading.js      paced reading modes on the child's reading screen
 /js/levels.js       reading levels (prompt guidelines, words per sentence)
 /js/print.js        printable worksheet and answer page
@@ -340,6 +341,23 @@ Types (rendered one at a time):
 - `tf` – true / false (נכון / לא נכון).
 - `fill` – sentence with a blank, choose the missing word from options.
 - `order` – sentences from the story shuffled; child drags or taps them into order.
+
+**Encouragement** (`js/praise.js`):
+- After a right answer: a praise sentence, picked at random but never the same as the one before, is shown and
+  heard; when the sound ends (+0.3 s), or after **2 s** when nothing is heard, the next screen comes by itself
+  (the last question leads to the finish screen). "הבא" before that moves on at once; leaving the screen in any
+  way cancels the automatic move and stops the sound. A question already answered right, seen again, does not
+  move on by itself.
+- After a wrong answer: a gentle "try again" sentence (`TRY`, all with "נסו"), shown and heard, plus what is
+  right so far (order exercise) or "אפשר להציץ בסיפור"; the child stays on the question.
+- Each sentence: `{text, audio}` (`assets/audio/praise-NN.mp3`, `try-NN.mp3`), optional `say` to speak other
+  words than the text. Sound: the recording if it loads; else the browser's Hebrew voice (`Util.speak`, the
+  text without emoji); else nothing (text only). A recording that fails is not asked for again during the
+  visit; one that never reports its end is not waited for beyond its length + 1.5 s (10 s at most).
+- **Mute** 🔊/🔇 at the top of every screen (next to the progress bar, 44 px), `localStorage`
+  `readingApp.muted`. Muted: no praise / try-again sound; the automatic move still waits 2 s. Words the child
+  taps to hear (story, games) still speak: the child asked for them.
+- A game's delayed speech (e.g. the listen game's word after 400 ms) is dropped once its screen is left.
 
 A question counts as **right** only when it was answered right on the first try. Skipping a question
 ("הבא" before answering) counts as not right, but the child can come back and answer it; a first-try answer

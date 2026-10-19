@@ -24,7 +24,7 @@
         } else {
           firstTry = false;
           btn.classList.add('tried', 'wiggle');
-          ctx.hint('כמעט! נסו שוב 🙂 אפשר להציץ בסיפור.');
+          ctx.hint(''); // the player adds a "try again" sentence (js/praise.js)
         }
       });
       box.appendChild(btn);
@@ -121,8 +121,7 @@
       answer = answer.slice(0, k);
       setTimeout(function () {
         draw();
-        ctx.hint(k ? 'כמעט! ' + (k === 1 ? 'המשפט הראשון במקום' : k + ' המשפטים הראשונים במקום') + '. נסו לסדר את השאר 🙂'
-                   : 'כמעט! נסו שוב 🙂 אפשר להציץ בסיפור.');
+        ctx.hint(k ? (k === 1 ? 'המשפט הראשון במקום' : k + ' המשפטים הראשונים במקום') + '. סדרו את השאר.' : '');
       }, 500);
     }
   }
@@ -130,6 +129,7 @@
   var RENDERERS = { mcq: mcq, tf: tf, fill: fill, order: order };
 
   // solved(firstTry) is called once when the child gets it right.
+  // ctx.hint(detail) after a wrong try: detail says what is right so far ('' = nothing to add).
   // done: the exercise was already answered right; it is shown solved and solved() is not called.
   function render(area, ex, lesson, ctx, solved, done) {
     var fn = RENDERERS[ex.type];

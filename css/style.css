@@ -266,6 +266,16 @@ body.play .wrap { max-width: 900px; padding-top: 0; }
   background: var(--bg);
   padding: calc(10px + env(safe-area-inset-top, 0px)) 0 10px;
 }
+.topbar { display: flex; align-items: center; gap: 10px; }
+.topbar .progress { flex: 1 1 auto; }
+.mute-btn {
+  flex: 0 0 auto;
+  width: 44px; height: 44px;
+  border: 2px solid var(--line); border-radius: 50%;
+  background: var(--card); font-size: 1.3rem; line-height: 1;
+  cursor: pointer; touch-action: manipulation;
+}
+.mute-btn[aria-pressed="true"] { border-color: var(--muted); background: #efe9de; }
 .progress { height: 14px; background: #ebe4d6; border-radius: 999px; overflow: hidden; }
 .progress > div { height: 100%; width: 0; background: var(--good); border-radius: 999px; transition: width 0.5s ease; }
 
