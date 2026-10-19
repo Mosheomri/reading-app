@@ -1,4 +1,5 @@
-/* Child flow: start → games → reading → exercises → finish. Nothing is saved or sent. */
+/* Child flow: start → games → reading → exercises → finish. Nothing is saved or sent.
+   After the start screen, a bottom bar (הקודם / הבא) moves freely between all screens. */
 (function () {
   'use strict';
 
@@ -12,13 +13,19 @@
 
   var stage = document.getElementById('stage');
   var progressFill = document.getElementById('progressFill');
+  var navBar = document.getElementById('nav');
+  var navPrev = document.getElementById('navPrev');
+  var navNext = document.getElementById('navNext');
 
   var lesson = null;
   var ctx = null;
   var games = [];
   var storySize = 30;
   var progress = { done: 0, total: 1 };
-  var score = { firstTry: 0 };
+  // Per exercise: {solved, firstTry, missed}. A skipped exercise has no entry, so it counts as not right.
+  var results = [];
+  var at = -1;        // current screen: 0..games.length-1 games, then reading, exercises, finish (-1: start / error)
+  var screenId = 0;   // bumped on every screen, so callbacks from a screen already left are ignored
   var cleanup = null; // stops whatever the current screen runs (paced reading timer)
 
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -32,10 +39,45 @@
 
   function screen() {
     if (cleanup) { cleanup(); cleanup = null; }
+    screenId++;
     U.clear(stage);
     window.scrollTo(0, 0);
     return stage;
   }
+
+  /* ---------- Navigation ---------- */
+
+  // Screen positions: games, reading, each exercise, finish. The finish position equals progress.total.
+  function readingAt() { return games.length; }
+  function finishAt() { return games.length + 1 + lesson.exercises.length; }
+
+  function go(k) {
+    at = Math.max(0, Math.min(finishAt(), k));
+    showNav(true);
+    navPrev.disabled = at === 0;
+    navNext.disabled = at === finishAt();
+    navNext.classList.remove('pop');
+    if (at < readingAt()) runGame(at);
+    else if (at === readingAt()) showReading();
+    else if (at < finishAt()) runExercise(at - readingAt() - 1);
+    else showFinish();
+  }
+
+  function showNav(on) {
+    navBar.hidden = !on;
+    document.body.classList.toggle('has-nav', on);
+  }
+
+  // The current screen is done: draw the eye to "הבא".
+  function nudgeNext() {
+    navNext.classList.remove('pop');
+    void navNext.offsetWidth; // restart the animation
+    navNext.classList.add('pop');
+    navNext.focus({ preventScroll: true });
+  }
+
+  navPrev.addEventListener('click', function () { if (at > 0) go(at - 1); });
+  navNext.addEventListener('click', function () { if (at >= 0 && at < finishAt()) go(at + 1); });
 
   // Feedback line used by games and exercises.
   function feedbackLine() {
@@ -64,6 +106,8 @@
 
   function showError() {
     progressFill.parentNode.hidden = true;
+    at = -1;
+    showNav(false);
     var s = screen();
     s.appendChild(el('div', { class: 'center-msg' },
       el('div', { class: 'celebrate' }, '🔗'),
@@ -73,6 +117,8 @@
 
   function showStart() {
     setProgress(0);
+    at = -1;
+    showNav(false);
     var s = screen();
     s.appendChild(el('div', { class: 'celebrate', 'aria-hidden': 'true' }, '📖'));
     s.appendChild(el('h1', null, R.text(lesson, lesson.title) || 'שיעור קריאה'));
@@ -82,34 +128,33 @@
     s.appendChild(el('div', { class: 'stage-actions' },
       el('button', { type: 'button', class: 'btn primary big', onclick: function () {
         if (ctx.hasVoice) ctx.speak(' '); // unlock speech on iOS (needs a user gesture)
-        score.firstTry = 0;
-        runGame(0);
+        results = [];
+        go(0);
       } }, 'מתחילים ▶')));
   }
 
   function runGame(i) {
-    if (i >= games.length) { showReading(); return; }
     setProgress(i);
     var game = games[i];
     var s = screen();
+    var id = screenId;
     var fb = feedbackLine();
     var area = el('div');
-    var nextBtn = el('button', { type: 'button', class: 'btn', onclick: function () { runGame(i + 1); } }, 'הלאה ←');
-    var againBtn = el('button', { type: 'button', class: 'btn', hidden: true, onclick: function () { runGame(i); } }, '↻ שוב');
+    var againBtn = el('button', { type: 'button', class: 'btn', hidden: true, onclick: function () { go(i); } }, '↻ שוב');
 
     s.appendChild(el('h1', null, game.name));
     s.appendChild(el('p', { class: 'lead' }, game.instruction));
     s.appendChild(area);
     s.appendChild(fb.node);
-    s.appendChild(el('div', { class: 'stage-actions' }, againBtn, nextBtn));
+    s.appendChild(el('div', { class: 'stage-actions' }, againBtn));
 
     var gctx = Object.assign({}, ctx, { praise: fb.praise, hint: fb.hint });
     game.play(area, gctx, function () {
+      if (id !== screenId) return;
       setProgress(i + 1);
       fb.praise('סיימתם את המשחק! 🎉');
       againBtn.hidden = false;
-      nextBtn.classList.add('primary', 'big', 'pop');
-      nextBtn.focus();
+      nudgeNext();
     });
   }
 
@@ -130,48 +175,51 @@
     if (ctx.hasVoice) s.appendChild(el('p', { class: 'muted small' }, 'לחצו על מילה כדי לשמוע אותה 🔊'));
 
     reader.appendChild(el('div', { class: 'story' }, R.story(lesson, ctx.hasVoice ? ctx.speak : null)));
-    var paced = window.Reading.controller({ reader: reader, story: lesson.story, onNext: function () { runExercise(0); } });
+    var paced = window.Reading.controller({ reader: reader, story: lesson.story, onNext: function () { go(readingAt() + 1); } });
     cleanup = paced.destroy;
     s.appendChild(paced.top);
     s.appendChild(reader);
     s.appendChild(paced.bar);
     s.appendChild(paced.end);
-    s.appendChild(el('div', { class: 'stage-actions' },
-      el('button', { type: 'button', class: 'btn primary big', onclick: function () { runExercise(0); } }, 'סיימתי לקרוא ←')));
   }
 
   function runExercise(i) {
     var exercises = lesson.exercises;
     var base = games.length + 1;
-    if (i >= exercises.length) { showFinish(); return; }
-    setProgress(base + i);
+    var r = results[i] || (results[i] = { solved: false, firstTry: false, missed: false });
+    setProgress(base + i + (r.solved ? 1 : 0));
     var s = screen();
+    var id = screenId;
     var fb = feedbackLine();
     var area = el('div');
-    var nextBtn = el('button', { type: 'button', class: 'btn primary big', hidden: true,
-      onclick: function () { runExercise(i + 1); } }, 'הלאה ←');
 
     s.appendChild(el('div', { class: 'row', style: 'justify-content:space-between' },
       el('span', { class: 'muted small' }, 'שאלה ' + (i + 1) + ' מתוך ' + exercises.length),
       el('button', { type: 'button', class: 'btn small quiet', onclick: storyOverlay }, '📖 לסיפור')));
     s.appendChild(area);
     s.appendChild(fb.node);
-    s.appendChild(el('div', { class: 'stage-actions' }, nextBtn));
 
-    var ectx = Object.assign({}, ctx, { praise: fb.praise, hint: fb.hint });
+    // Exercises call hint() only after a wrong try. A wrong try counts even if the child leaves and comes back.
+    var ectx = Object.assign({}, ctx, {
+      praise: fb.praise,
+      hint: function (text) { r.missed = true; if (id === screenId) fb.hint(text); }
+    });
     window.Exercises.render(area, exercises[i], lesson, ectx, function (firstTry) {
-      if (firstTry) score.firstTry++;
+      if (id !== screenId || r.solved) return;
+      r.solved = true;
+      r.firstTry = firstTry && !r.missed;
       setProgress(base + i + 1);
       fb.praise();
-      nextBtn.hidden = false;
-      nextBtn.focus();
-    });
+      nudgeNext();
+    }, r.solved);
+    if (r.solved) fb.praise('כבר עניתם נכון ✓');
   }
 
   function showFinish() {
     setProgress(progress.total);
     var n = lesson.exercises.length;
-    var ratio = n ? score.firstTry / n : 1;
+    var right = results.filter(function (r) { return r && r.solved && r.firstTry; }).length;
+    var ratio = n ? right / n : 1;
     var stars = ratio >= 0.8 ? 3 : ratio >= 0.5 ? 2 : 1;
     var s = screen();
     s.appendChild(el('div', { class: 'celebrate pop', 'aria-hidden': 'true' }, '🏆'));

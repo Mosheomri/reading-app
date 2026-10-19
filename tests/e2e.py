@@ -154,8 +154,8 @@ with sync_playwright() as p:
             child.wait_for_timeout(150)
     child.wait_for_timeout(800)
     check(child.locator(".mcard.matched").count() == 8, "memory solved")
-    check("primary" in child.get_attribute(".stage-actions .btn:last-child", "class"), "next button highlighted after game")
-    child.click(".stage-actions .btn:last-child")
+    check("pop" in child.get_attribute("#navNext", "class"), "next button highlighted after game")
+    child.click("#navNext")
 
     # Build word
     check(child.text_content("#stage h1") == "הרכבת מילה", "build game second")
@@ -174,7 +174,7 @@ with sync_playwright() as p:
             child.locator(".tile:not(.used)").filter(has_text=L_).first.click()
         child.wait_for_timeout(1600)
     check("סיימתם" in child.text_content(".feedback"), "build game finished")
-    child.click(".stage-actions .btn:last-child")
+    child.click("#navNext")
 
     # Listen game is skipped headless (no Hebrew voice) → reading
     h1 = child.text_content("#stage h1")
@@ -185,7 +185,7 @@ with sync_playwright() as p:
     size1 = child.evaluate("getComputedStyle(document.querySelector('.reader .story')).fontSize")
     check(size0 == "30px" and size1 == "34px", "text size %s → %s" % (size0, size1))
     child.screenshot(path=os.path.join(OUT, "c3-reading.png"), full_page=True)
-    child.click("text=סיימתי לקרוא ←")
+    child.click("#navNext")
 
     # Exercises
     dec = child.evaluate("Lesson.decode(location.hash)")
@@ -195,7 +195,7 @@ with sync_playwright() as p:
             if k == 0:
                 wrong = [b for b in child.eval_on_selector_all(".option", "els => els.map(e => e.textContent)") if b != correct][0]
                 child.locator(".option", has_text=wrong).first.click()
-                check(child.is_hidden(".stage-actions .btn"), "wrong answer: no advance, retry allowed")
+                check("נסו" in child.text_content(".feedback") and "pop" not in child.get_attribute("#navNext", "class"), "wrong answer: hint, retry allowed")
                 child.click("text=📖 לסיפור")
                 check(child.is_visible(".overlay"), "story hint overlay")
                 child.click(".overlay .sheet .btn")
@@ -207,10 +207,10 @@ with sync_playwright() as p:
             for s in ex["sentences"]:
                 shown = child.evaluate("(o) => Render.text(Lesson.decode(location.hash), o)", s)
                 child.locator(".order-list:not(.answer) .order-item").filter(has_text=shown).first.click()
-        child.wait_for_selector(".stage-actions .btn:visible")
+        child.wait_for_selector("#navNext.pop")
         if k == 5:
             check(child.locator(".blank.filled").count() == 1, "fill blank filled after answer")
-        child.click(".stage-actions .btn")
+        child.click("#navNext")
 
     check(child.text_content("#stage h1") == "כל הכבוד!", "finish screen")
     stars = child.text_content(".stars")

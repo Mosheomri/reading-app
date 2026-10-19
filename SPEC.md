@@ -145,6 +145,20 @@ check that the text fits the lesson's level, and to report mismatches as `style`
 
 Fixed order: **Games → Reading → Exercises → Finish**. Progress bar on top.
 
+### 4.0 Navigation bar
+- From the first game to the finish, every screen has a bar fixed to the bottom of the screen with two big
+  buttons: **"→ הקודם"** (right) and **"הבא ←"** (left). The start screen has no bar (its "מתחילים ▶" button
+  opens the first screen).
+- The screens, in order: each game, the reading screen, **each question** on its own, the finish screen.
+  "הקודם" on question 1 goes back to the reading screen.
+- Both buttons are always active, except "הקודם" on the first screen and "הבא" on the finish screen
+  (disabled). "הבא" never waits for the screen to be done; when a game ends or a question is answered right
+  it pops once and takes focus.
+- The bar has a fixed height (`--nav-h`: 84px + the bottom safe area). On a phone the two buttons share the
+  width (thumb size, at least 56px high); on wider screens each is at least 180px wide. The page leaves room
+  below its content so nothing ends up hidden behind the bar.
+- Going back to a game starts it again. Coming back to the reading screen starts it fresh (mode "רגיל").
+
 ### 4.1 Games (learn the target words)
 All games use only the lesson's target words (+ their emojis).
 1. **זוגות (Memory)** – cards: word ↔ emoji. Flip two, match pairs.
@@ -152,7 +166,7 @@ All games use only the lesson's target words (+ their emojis).
 3. **שומעים ובוחרים** – the word is read aloud (Web Speech API, `he-IL`); child picks it from 3–4 target words.
    If no Hebrew voice is available on the device, skip this game silently.
 
-Child can replay a game or press "הלאה".
+Child can replay a game ("↻ שוב", after it ends) or move on with "הבא" at any time.
 
 ### 4.2 Reading
 - Story displayed per the nikud mode (section 7).
@@ -185,9 +199,10 @@ Child can replay a game or press "הלאה".
   - סימון מתקדם: the mark stays on the sentence's last word for its time plus the stop.
   - מילים נעלמות: the last word (with its punctuation) vanishes after its own time; the stop runs after it is
     gone, before the next word's time starts. So nothing is still shown that belongs to the finished sentence.
-- **Playback controls** (sticky at the bottom of the screen while reading): התחל / עצור, מילה אחורה,
-  מההתחלה. Switching mode stops and resets to the start. At the end of the story playback stops and offers
-  "עוד פעם" (restart) or "הלאה" (to the exercises). Leaving the screen stops the timer.
+- **Playback controls** (sticky at the bottom of the screen while reading, right above the navigation bar,
+  never under it): התחל / עצור, מילה אחורה, מההתחלה. Switching mode stops and resets to the start. At the end
+  of the story playback stops and offers "עוד פעם" (restart) or "הלאה" (to the exercises). Leaving the
+  screen (any way, including the navigation bar) stops the timer.
 
 ### 4.3 Exercises
 Types (rendered one at a time):
@@ -196,8 +211,15 @@ Types (rendered one at a time):
 - `fill` – sentence with a blank, choose the missing word from options.
 - `order` – sentences from the story shuffled; child drags or taps them into order.
 
+A question counts as **right** only when it was answered right on the first try. Skipping a question
+("הבא" before answering) counts as not right, but the child can come back and answer it; a first-try answer
+then counts. A wrong try counts even if the child leaves the question and comes back before answering right.
+Coming back to a question already answered right shows it solved (right option marked, blank filled, sentences
+in order, "כבר עניתם נכון ✓"); it takes no clicks and the score does not change.
+
 ### 4.4 Finish
-- "כל הכבוד!" screen with a simple summary (e.g. stars). Button to start again.
+- "כל הכבוד!" screen with stars: right questions / all questions ≥ 0.8 → 3, ≥ 0.5 → 2, else 1.
+  Button to start again ("↻ מתחילים מחדש" → start screen, all answers cleared).
 - Nothing is saved or sent anywhere.
 
 ---

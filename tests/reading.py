@@ -37,7 +37,7 @@ def open_reading(browser, lesson, clear_storage=True, context=None, **page_opts)
     page.click("text=מתחילים ▶")
     for _ in range(5):  # skip the games
         if page.locator("#stage .reader").count(): break
-        page.click("#stage .stage-actions button:has-text('הלאה')")
+        page.click("#navNext")
     return page
 
 def cur(page):
@@ -263,7 +263,7 @@ with sync_playwright() as p:
     page.locator(".read-modes .btn").nth(1).click()
     check(page.input_value(".pace-range input") == "45" and page.text_content(".pace-label") == "45 מילים בדקה", "last pace (45) restored from localStorage")
     page.click("[data-act='play']")
-    page.click("text=סיימתי לקרוא ←")
+    page.click("#navNext")
     page.clock.run_for(5 * 60 * 1000)
     check("שאלה 1 מתוך" in page.text_content("#stage") and not errors, "leaving while playing: timer stopped, no errors")
     page.close()

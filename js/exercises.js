@@ -8,12 +8,13 @@
 
   // Shared logic for "pick one button" exercises.
   // items: [{label: Node|string, correct: bool}]
-  function choiceButtons(area, items, ctx, onRight, twoCols) {
+  // done: already answered right, so show the right option marked and accept no clicks.
+  function choiceButtons(area, items, ctx, onRight, twoCols, done) {
     var firstTry = true;
-    var solved = false;
+    var solved = !!done;
     var box = el('div', { class: 'options' + (twoCols ? ' two' : '') });
     items.forEach(function (item) {
-      var btn = el('button', { type: 'button', class: 'option' }, item.label);
+      var btn = el('button', { type: 'button', class: 'option' + (done && item.correct ? ' right' : '') }, item.label);
       btn.addEventListener('click', function () {
         if (solved || btn.classList.contains('tried')) return;
         if (item.correct) {
@@ -37,33 +38,34 @@
     }));
   }
 
-  function mcq(area, ex, lesson, ctx, solved) {
+  function mcq(area, ex, lesson, ctx, solved, done) {
     area.appendChild(el('div', { class: 'question' }, R.text(lesson, ex.question)));
-    choiceButtons(area, shuffledOptions(lesson, ex), ctx, solved);
+    choiceButtons(area, shuffledOptions(lesson, ex), ctx, solved, false, done);
   }
 
-  function tf(area, ex, lesson, ctx, solved) {
+  function tf(area, ex, lesson, ctx, solved, done) {
     area.appendChild(el('div', { class: 'question' }, R.text(lesson, ex.statement)));
     choiceButtons(area, [
       { label: '👍 נכון', correct: ex.answer === true },
       { label: '👎 לא נכון', correct: ex.answer === false }
-    ], ctx, solved, true);
+    ], ctx, solved, true, done);
   }
 
-  function fill(area, ex, lesson, ctx, solved) {
-    var q = el('div', { class: 'question' }, R.fillSentence(lesson, ex.sentence));
+  function fill(area, ex, lesson, ctx, solved, done) {
+    var q = el('div', { class: 'question' }, R.fillSentence(lesson, ex.sentence, done ? ex.options[ex.answer] : undefined));
     area.appendChild(q);
     choiceButtons(area, shuffledOptions(lesson, ex), ctx, function (firstTry) {
       U.clear(q).appendChild(R.fillSentence(lesson, ex.sentence, ex.options[ex.answer]));
       solved(firstTry);
-    });
+    }, false, done);
   }
 
-  function order(area, ex, lesson, ctx, solved) {
+  function order(area, ex, lesson, ctx, solved, done) {
     var n = ex.sentences.length;
-    var locked = 0;           // correct prefix already confirmed
-    var answer = [];          // indices placed by the child
-    var pool = U.shuffleChanged(ex.sentences.map(function (s, i) { return i; }));
+    var all = ex.sentences.map(function (s, i) { return i; });
+    var locked = done ? n : 0;            // correct prefix already confirmed
+    var answer = done ? all : [];         // indices placed by the child
+    var pool = done ? [] : U.shuffleChanged(all);
     var firstTry = true;
 
     area.appendChild(el('div', { class: 'question' }, 'סדרו את המשפטים לפי הסדר בסיפור'));
@@ -128,10 +130,11 @@
   var RENDERERS = { mcq: mcq, tf: tf, fill: fill, order: order };
 
   // solved(firstTry) is called once when the child gets it right.
-  function render(area, ex, lesson, ctx, solved) {
+  // done: the exercise was already answered right; it is shown solved and solved() is not called.
+  function render(area, ex, lesson, ctx, solved, done) {
     var fn = RENDERERS[ex.type];
-    if (fn) fn(area, ex, lesson, ctx, solved);
-    else solved(true);
+    if (fn) fn(area, ex, lesson, ctx, solved, !!done);
+    else if (!done) solved(true);
   }
 
   window.Exercises = { render: render };
