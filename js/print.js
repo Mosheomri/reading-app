@@ -117,11 +117,24 @@
     }));
   }
 
+  var LOGO_SRC = 'assets/logo-web.png';
+  var LOGO_ALT = 'צועדים קדימה עם מיכל – למידה, ביטחון, הצלחה';
+
+  // Resolves when the sheet's images are ready to print (a new <img> may still be loading), at most after ms.
+  function ready(sheet, ms) {
+    var imgs = Array.prototype.slice.call(sheet.querySelectorAll('img'));
+    var all = Promise.all(imgs.map(function (img) {
+      return img.decode ? img.decode().catch(function () {}) : Promise.resolve();
+    }));
+    return Promise.race([all, new Promise(function (r) { setTimeout(r, ms || 1500); })]);
+  }
+
   // opts: {answers: boolean}. Returns the sheet element.
   function build(lesson, opts) {
     opts = opts || {};
     var items = layout(lesson);
     var sheet = el('div', { class: 'print-sheet', lang: 'he', dir: 'rtl' });
+    sheet.appendChild(el('img', { class: 'p-logo', src: LOGO_SRC, alt: LOGO_ALT }));
     sheet.appendChild(el('div', { class: 'p-head' },
       el('span', null, 'שם: ', el('span', { class: 'p-fill' })),
       el('span', null, 'תאריך: ', el('span', { class: 'p-fill short' }))));
@@ -142,5 +155,5 @@
     return sheet;
   }
 
-  window.Print = { hashString: hashString, layout: layout, build: build };
+  window.Print = { hashString: hashString, layout: layout, build: build, ready: ready };
 })();

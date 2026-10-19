@@ -232,6 +232,7 @@
     s.appendChild(el('p', { class: 'lead' }, parts.join(', ') + '.'));
     s.appendChild(el('div', { class: 'stage-actions' },
       el('button', { type: 'button', class: 'btn primary big', onclick: showStart }, '↻ מתחילים מחדש')));
+    s.appendChild(el('img', { class: 'finish-logo', src: 'assets/logo-web.png', width: 720, height: 271, alt: 'צועדים קדימה עם מיכל – למידה, ביטחון, הצלחה' }));
   }
 
   /* ---------- Init ---------- */

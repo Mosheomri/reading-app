@@ -16,6 +16,11 @@ then sends the child a link. The child plays, reads and answers – **no AI, no 
 - **The lesson lives inside the link**: lesson JSON → compressed with LZ-String
   (`compressToEncodedURIComponent`) → placed in the URL **hash**: `play.html#<data>`.
   The hash is never sent to any server, so no data about the child or lesson is stored anywhere.
+- **Logo**: `assets/logo.png` is the original (1824 × 862, ~900 KB, white background), not loaded by the site.
+  `assets/logo-web.png` is made from it (margins trimmed, white made transparent, 720 px wide, 128 colors,
+  ~20 KB) and shown at the top of the teacher page and both setup pages (there it links to the teacher page;
+  up to 300 px wide, 72vw on phones), at the top of the print sheet (48 mm; printing waits until it is
+  decoded, at most 1.5 s), and small (up to 160 px) under the buttons of the child's finish screen.
 - Vendor LZ-String locally (`js/lz-string.min.js`), do not rely on a CDN.
 - No analytics, no cookies, no tracking. `localStorage` only for conveniences: the teacher's last form values
   and draft, and the child's last reading pace.

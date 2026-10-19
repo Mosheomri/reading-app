@@ -1146,8 +1146,9 @@
     $('copyLink').addEventListener('click', function () { copy(state.link, 'הקישור הועתק!'); });
     $('downloadJson').addEventListener('click', downloadJson);
     $('printBtn').addEventListener('click', function () {
-      U.clear($('printArea')).appendChild(window.Print.build(state.lesson, { answers: $('printAnswers').checked }));
-      window.print();
+      var sheet = window.Print.build(state.lesson, { answers: $('printAnswers').checked });
+      U.clear($('printArea')).appendChild(sheet);
+      window.Print.ready(sheet).then(function () { window.print(); });
     });
     $('newLesson').addEventListener('click', function () {
       cancelAuto();

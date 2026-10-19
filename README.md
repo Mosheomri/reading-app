@@ -90,6 +90,8 @@ js/gemini.js          Gemini API: המודל (קבוע MODEL בראש הקובץ
 gemini-setup.html     הוראות למורה: יצירת מפתח Gemini ב-Google AI Studio
 userscripts/dicta-bridge.user.js   סקריפט Tampermonkey שרץ בדיקטה (הסלקטורים של דיקטה בראש הקובץ)
 dicta-setup.html      הוראות התקנה של הגשר לדיקטה, למורה
+assets/logo.png       הלוגו המקורי (לא נטען באתר)
+assets/logo-web.png   הלוגו לאתר: שוליים חתוכים, רקע שקוף, ברוחב 720 (כ-20KB). בעמוד המורה, בעמודי ההוראות, בדף ההדפסה ובמסך הסיום של הילד
 js/util.js            עזרים: DOM, העתקה, הקראה
 js/lz-string.min.js   LZ-String 1.5.0 (רישיון MIT)
 tests/                בדיקות אוטומטיות (Playwright בפייתון)

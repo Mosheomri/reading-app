@@ -45,6 +45,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 
 h1, h2, h3 { line-height: 1.3; margin: 0 0 12px; }
+
+/* Logo (assets/logo-web.png: trimmed, transparent, 720 × 271) */
+.site-head .site-logo { display: block; width: min(300px, 72vw); height: auto; margin: 4px 0 10px; }
+.finish-logo { display: block; width: min(160px, 45vw); height: auto; margin: 28px auto 0; opacity: 0.95; }
 h1 { font-size: 1.6rem; }
 h2 { font-size: 1.25rem; }
 h3 { font-size: 1.05rem; }
@@ -601,6 +605,7 @@ code.addr { direction: ltr; unicode-bidi: isolate; background: #f6f2ea; border-r
 }
 /* Marks are borders, not backgrounds: browsers skip backgrounds when printing by default. */
 .print-sheet { color: #000; font-family: var(--font); font-size: 16pt; line-height: 1.6; text-align: right; }
+.print-sheet .p-logo { display: block; width: 48mm; height: auto; margin: 0 auto 4mm; }
 .print-sheet .p-head { display: flex; justify-content: space-between; gap: 12mm; margin-bottom: 6mm; }
 .print-sheet .p-fill { display: inline-block; width: 60mm; border-bottom: 1.5px solid #000; }
 .print-sheet .p-fill.short { width: 35mm; }
