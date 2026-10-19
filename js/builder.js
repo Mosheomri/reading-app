@@ -136,6 +136,12 @@
 
   function submitSettings(e) {
     e.preventDefault();
+    cancelAuto();
+    if (readSettings()) showStep(2);
+  }
+
+  // Validates the form and builds the prompt (state.request, #promptText). Returns false on errors.
+  function readSettings() {
     var f = readForm();
     var errors = [];
     if (!f.topic) errors.push('כתבו נושא לסיפור.');
@@ -145,46 +151,37 @@
     if (f.wordsMode === 'list' && (words.length < 2 || words.length > 10)) errors.push('כתבו בין 2 ל-10 מילות יעד (כתבתם ' + words.length + ').');
 
     var msgs = U.clear($('settingsMsgs'));
-    if (errors.length) { msgs.appendChild(msgBox('error', null, errors)); return; }
+    if (errors.length) { msgs.appendChild(msgBox('error', null, errors)); return false; }
 
     save(STORE_SETTINGS, f);
     state.settings = f;
     state.request = { topic: f.topic, length: f.length, level: f.level, wordsMode: f.wordsMode, wordCount: f.wordCount, words: words };
     $('promptText').textContent = window.buildPrompt(state.request);
-    showStep(2);
+    return true;
   }
 
   /* ---------- Step 3: parse response ---------- */
 
   var pendingLesson = null;
 
-  function parseResponse() {
-    var msgs = U.clear($('parseMsgs'));
-    $('fixBox').hidden = true;
-    $('continueAnyway').hidden = true;
-    pendingLesson = null;
-
-    var text = $('response').value;
-    if (!text.trim()) { msgs.appendChild(msgBox('error', 'לא הודבקה תשובה.')); return; }
+  // The checks on an AI response, pasted or from Gemini.
+  // Returns {error, items, fix} when there is no lesson to edit, else {lesson, errors, warnings, problems}.
+  function analyzeResponse(text) {
+    if (!text.trim()) return { error: 'לא הודבקה תשובה.' };
 
     var ex = L.extractJson(text);
     if (ex.error) {
       var noJson = ex.error === 'no-json';
-      msgs.appendChild(msgBox('error', noJson
-        ? 'לא מצאתי JSON בתשובה. ודאו שהעתקתם את כל התשובה.'
-        : 'ה-JSON בתשובה לא תקין. ייתכן שהתשובה נקטעה באמצע.'));
-      showFix(noJson
-        ? 'החזר את התשובה כ-JSON בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, במבנה שביקשתי.'
-        : 'ה-JSON ששלחת לא תקין או נקטע באמצע. החזר שוב את ה-JSON המלא בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו.');
-      return;
+      return {
+        error: noJson ? 'לא מצאתי JSON בתשובה. ודאו שהעתקתם את כל התשובה.' : 'ה-JSON בתשובה לא תקין. ייתכן שהתשובה נקטעה באמצע.',
+        fix: noJson
+          ? 'החזר את התשובה כ-JSON בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, במבנה שביקשתי.'
+          : 'ה-JSON ששלחת לא תקין או נקטע באמצע. החזר שוב את ה-JSON המלא בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו.'
+      };
     }
 
     var c = L.coerce(ex.value);
-    if (!c.lesson) {
-      msgs.appendChild(msgBox('error', 'חסרים חלקים בשיעור:', c.fatal));
-      showFix(L.fixMessage(c.fatal));
-      return;
-    }
+    if (!c.lesson) return { error: 'חסרים חלקים בשיעור:', items: c.fatal, fix: L.fixMessage(c.fatal) };
 
     var lesson = c.lesson;
     if (state.settings) {
@@ -195,14 +192,32 @@
     // Automatic fixes are shown as warnings but not sent back to the AI.
     var notes = c.notes.concat(L.sortOrderExercises(lesson));
     var res = L.check(lesson, state.request);
-    var warnings = notes.concat(res.warnings);
+    return { lesson: lesson, errors: res.errors, warnings: notes.concat(res.warnings), problems: res.errors.concat(res.warnings) };
+  }
+
+  function parseResponse() {
+    cancelAuto();
+    var msgs = U.clear($('parseMsgs'));
+    $('fixBox').hidden = true;
+    $('continueAnyway').hidden = true;
+    pendingLesson = null;
+
+    var a = analyzeResponse($('response').value);
+    if (a.error) {
+      msgs.appendChild(msgBox('error', a.error, a.items));
+      if (a.fix) showFix(a.fix);
+      return;
+    }
+    var lesson = a.lesson;
+    var res = { errors: a.errors };
+    var warnings = a.warnings;
     if (!res.errors.length && !warnings.length) {
       acceptLesson(lesson, state.request);
       return;
     }
     if (res.errors.length) msgs.appendChild(msgBox('error', 'צריך לתקן:', res.errors));
     if (warnings.length) msgs.appendChild(msgBox('warn', 'שימו לב:', warnings));
-    var problems = res.errors.concat(res.warnings);
+    var problems = a.problems;
     if (problems.length) {
       msgs.appendChild(msgBox('info', 'אפשר לשלוח לבינה הודעת תיקון, או להמשיך ולתקן בעצמכם בשלב העריכה.'));
       showFix(L.fixMessage(problems));
@@ -249,6 +264,7 @@
       var ex = L.extractJson(reader.result);
       var c = ex.error ? { lesson: null, fatal: ['הקובץ אינו קובץ שיעור תקין.'] } : L.coerce(ex.value);
       if (!c.lesson) { msgs.appendChild(msgBox('error', 'לא הצלחתי לטעון את הקובץ:', c.fatal)); return; }
+      cancelAuto();
       state.maxStep = 3;
       // A saved lesson file came out of this app: if every word has nikud, it was already vocalized.
       var vocalized = RV.hasAnyNikud(c.lesson) && !L.unvocalizedWords(c.lesson).length;
@@ -605,16 +621,18 @@
     $('reviewPromptBox').hidden = false;
   }
 
+  // Returns the number of suggestions shown, or -1 when the response could not be read.
   function parseReview() {
     var msgs = U.clear($('reviewMsgs'));
     var list = U.clear($('reviewList'));
     var text = $('reviewResponse').value;
-    if (!text.trim()) { msgs.appendChild(msgBox('error', 'לא הודבקה תשובה.')); return; }
+    if (!text.trim()) { msgs.appendChild(msgBox('error', 'לא הודבקה תשובה.')); return -1; }
     var r = RV.parseSuggestions(text);
-    if (r.error) { msgs.appendChild(msgBox('error', r.error, ['ודאו שהעתקתם את כל התשובה, או בקשו מהבינה להחזיר JSON בבלוק קוד.'])); return; }
-    if (!r.items.length) { msgs.appendChild(msgBox('ok', 'הבינה לא מצאה מה לתקן ✓')); return; }
+    if (r.error) { msgs.appendChild(msgBox('error', r.error, ['ודאו שהעתקתם את כל התשובה, או בקשו מהבינה להחזיר JSON בבלוק קוד.'])); return -1; }
+    if (!r.items.length) { msgs.appendChild(msgBox('ok', 'הבינה לא מצאה מה לתקן ✓')); return 0; }
     msgs.appendChild(msgBox('info', 'נמצאו ' + r.items.length + ' הצעות. אשרו או דחו כל הצעה.'));
     r.items.forEach(function (item) { list.appendChild(reviewCard(item)); });
+    return r.items.length;
   }
 
   function reviewCard(item) {
@@ -652,12 +670,13 @@
       status.textContent = text;
       card.classList.add(cls);
       actions.hidden = true;
+      reviewDecided();
     }
     approve.addEventListener('click', function () {
       if (!RV.applySuggestion(state.lesson, item)) { warn.hidden = false; approve.disabled = true; return; }
-      done('אושר ✓', 'accepted');
       changed();
       dropStaleNikud();
+      done('אושר ✓', 'accepted');
     });
     reject.addEventListener('click', function () { done('נדחה', 'rejected'); });
     return card;
@@ -676,6 +695,7 @@
     var sig = RV.signature(state.lesson);
     var status = el('div', { class: 'msg info', role: 'status' });
     btn.disabled = true;
+    if (auto && auto.stages.nikud.state === 'wait') stage('nikud', 'active');
     DB.start(RV.plainText(state.lesson), {
       status: function (kind, info) {
         status.textContent = kind === 'opening' ? 'פותחים את דיקטה בחלון חדש…'
@@ -687,6 +707,7 @@
         U.clear(msgs);
         if (RV.signature(state.lesson) !== sig) {
           msgs.appendChild(msgBox('warn', 'הטקסט השתנה בזמן הניקוד. לחצו שוב על "נקד אוטומטית בדיקטה".'));
+          nikudStageFailed();
           return;
         }
         $('dictaText').value = text;
@@ -695,6 +716,7 @@
       fail: function (reason, message) {
         btn.disabled = false;
         U.clear(msgs).appendChild(autoNikudFailure(reason, message));
+        nikudStageFailed();
       }
     });
   }
@@ -732,11 +754,12 @@
     var list = U.clear($('nikudList'));
     U.clear($('checkStepMsgs'));
     var r = RV.compareNikud(state.lesson, $('dictaText').value);
-    if (r.error) { msgs.appendChild(msgBox('error', r.error, r.details)); return; }
+    if (r.error) { msgs.appendChild(msgBox('error', r.error, r.details)); nikudStageFailed(); return; }
     var filled = RV.applyFills(r.fills);
     state.nikudVerified = RV.signature(state.lesson);
     changed();
     syncCheckStep();
+    nikudStageDone();
     if (filled) msgs.appendChild(msgBox('ok', 'הניקוד של דיקטה הוחל על ' + (filled === 1 ? 'מילה אחת' : filled + ' מילים') + ' ✓'));
     if (!r.diffs.length) {
       if (!filled) msgs.appendChild(msgBox('ok', 'הניקוד זהה לניקוד של דיקטה ✓'));
@@ -780,6 +803,243 @@
     dictaBtn.addEventListener('click', function () { pick('dicta'); });
     show();
     return { node: node, pick: pick };
+  }
+
+  /* ---------- Gemini: key and the automatic flow ---------- */
+
+  var G = window.Gemini;
+
+  function syncGemini() {
+    var has = !!G.getKey();
+    $('autoCreate').hidden = !has;
+    $('autoCreateHint').hidden = !has;
+    $('geminiState').hidden = !has;
+    $('makePrompt').classList.toggle('primary', !has);
+    $('makePrompt').classList.toggle('big', !has);
+    $('deleteKey').disabled = !has;
+    $('geminiKey').placeholder = has ? 'מפתח שמור (…' + G.getKey().slice(-4) + '). אפשר להדביק מפתח אחר.' : 'הדביקו כאן את המפתח';
+  }
+
+  function checkKey() {
+    var msgs = U.clear($('geminiMsgs'));
+    var key = $('geminiKey').value.trim() || G.getKey();
+    if (!key) { msgs.appendChild(msgBox('error', 'הדביקו קודם את המפתח בשדה.')); return; }
+    var btn = $('checkKey');
+    btn.disabled = true;
+    msgs.appendChild(msgBox('info', 'בודקים את המפתח…'));
+    G.checkKey(key).then(function () {
+      G.setKey(key);
+      $('geminiKey').value = '';
+      U.clear(msgs).appendChild(msgBox('ok', 'המפתח תקין ונשמר בדפדפן הזה ✓ עכשיו אפשר ללחוץ על "✨ צור שיעור".'));
+      syncGemini();
+    }, function (e) {
+      U.clear(msgs).appendChild(msgBox('error', (e && e.message) || 'לא הצלחתי לבדוק את המפתח.',
+        e && e.kind === 'key' ? [el('span', null, 'ראו ', el('a', { href: 'gemini-setup.html', target: '_blank', rel: 'noopener' }, 'איך מקבלים מפתח'), '.')] : null));
+    }).then(function () { btn.disabled = false; });
+  }
+
+  function deleteKey() {
+    G.clearKey();
+    $('geminiKey').value = '';
+    U.clear($('geminiMsgs')).appendChild(msgBox('ok', 'המפתח נמחק מהדפדפן הזה.'));
+    syncGemini();
+  }
+
+  // Stage states: '' (not yet), active, done, fail, skip, wait (the teacher's turn).
+  var STAGES = [
+    { id: 'write', active: 'כותב סיפור…', done: 'הסיפור נכתב' },
+    { id: 'check', active: 'בודק את השיעור…', done: 'השיעור עבר את הבדיקות' },
+    { id: 'review', active: 'בודק טקסט…', done: 'בדיקת הטקסט הסתיימה' },
+    { id: 'approve', active: 'מחכה לאישור ההצעות שלכם', done: 'ההצעות טופלו' },
+    { id: 'nikud', active: 'מנקד בדיקטה…', done: 'הטקסט מנוקד' }
+  ];
+  var ICONS = { '': '○', active: '⏳', done: '✓', fail: '✕', skip: '–', wait: '👆' };
+
+  var auto = null; // {id, stages: {id: {state, note}}, waitingApproval}
+  var autoRuns = 0;
+
+  function renderStages() {
+    var ol = U.clear($('autoStages'));
+    STAGES.forEach(function (st) {
+      var s = auto.stages[st.id];
+      var text = s.note || (s.state === 'done' ? st.done : st.active.replace(/…$/, ''));
+      ol.appendChild(el('li', { class: s.state || 'todo', 'data-stage': st.id },
+        el('span', { class: 'icon', 'aria-hidden': 'true' }, ICONS[s.state]),
+        el('span', null, s.state === 'active' && !s.note ? st.active : text)));
+    });
+  }
+
+  function stage(id, st, note) {
+    if (!auto) return;
+    auto.stages[id] = { state: st, note: note || '' };
+    renderStages();
+  }
+
+  function cancelAuto() {
+    if (!auto) return;
+    autoRuns++;
+    auto = null;
+    $('autoFlow').hidden = true;
+    $('autoCreate').disabled = false;
+  }
+
+  function flowMsg(box) {
+    U.clear($('autoFlowMsgs'));
+    if (box) $('autoFlowMsgs').appendChild(box);
+  }
+
+  function actionBtn(label, onClick, primary) {
+    return el('button', { type: 'button', class: 'btn small' + (primary ? ' primary' : ''), onclick: onClick }, label);
+  }
+
+  function autoCreate() {
+    cancelAuto();
+    if (!readSettings()) return;
+    var key = G.getKey();
+    if (!key) { syncGemini(); return; }
+    var run = ++autoRuns;
+    auto = { stages: {}, waitingApproval: false };
+    STAGES.forEach(function (st) { auto.stages[st.id] = { state: '', note: '' }; });
+    if (state.settings.nikud === 'none') auto.stages.nikud = { state: 'skip', note: 'בלי ניקוד' };
+    $('autoFlow').hidden = false;
+    flowMsg(null);
+    $('autoCreate').disabled = true;
+    stage('write', 'active');
+    var current = function () { return auto && run === autoRuns; };
+
+    G.writeLesson(key, $('promptText').textContent, function () {
+      if (current()) stage('write', 'active', 'תקלה זמנית, מנסים שוב…');
+    }).then(function (text) {
+      if (!current()) return;
+      stage('write', 'done');
+      stage('check', 'active');
+      $('response').value = text; // the answer is there for step 3, as if pasted
+      var a = analyzeResponse(text);
+      if (a.error || a.errors.length) {
+        $('autoCreate').disabled = false;
+        stage('check', 'fail', 'השיעור שהתקבל לא עבר את הבדיקות');
+        markRest('check');
+        showStep(2);
+        flowMsg(el('div', null,
+          msgBox('error', 'השיעור ש-Gemini כתב לא עבר את הבדיקות:', a.error ? [a.error].concat(a.items || []) : a.errors),
+          msgBox('info', 'אפשר לנסות שוב, לתקן בעצמכם, או להמשיך בהעתק-הדבק: הפרומפט מוכן כאן למטה, לכל צ׳אט.'),
+          el('div', { class: 'row' },
+            actionBtn('↻ לנסות שוב', autoCreate, true),
+            actionBtn('לראות את התשובה ולתקן', function () { showStep(3); parseResponse(); }))));
+        return;
+      }
+      acceptLesson(a.lesson, state.request);
+      stage('check', 'done', a.warnings.length ? 'השיעור עבר את הבדיקות (יש הערות בתצוגה)' : '');
+      autoReview(key, run);
+    }, function (e) {
+      if (!current()) return;
+      $('autoCreate').disabled = false;
+      stage('write', 'fail', 'הכתיבה לא הצליחה');
+      markRest('write');
+      showStep(2);
+      flowMsg(el('div', null,
+        msgBox('error', (e && e.message) || 'Gemini לא הצליח לכתוב את השיעור.',
+          e && e.kind === 'key' ? [el('span', null, 'בדקו את המפתח בשלב 1, או ראו ', el('a', { href: 'gemini-setup.html', target: '_blank', rel: 'noopener' }, 'איך מקבלים מפתח'), '.')] : null),
+        msgBox('info', 'אפשר להמשיך בהעתק-הדבק: הפרומפט מוכן כאן למטה. העתיקו אותו לכל צ׳אט (Gemini, ChatGPT ואחרים).'),
+        el('div', { class: 'row' }, actionBtn('↻ לנסות שוב', autoCreate, true))));
+    });
+  }
+
+  // Stages after a failed one will not run.
+  function markRest(afterId) {
+    var after = false;
+    STAGES.forEach(function (st) {
+      if (after && !auto.stages[st.id].state) auto.stages[st.id] = { state: 'skip', note: '' };
+      if (st.id === afterId) after = true;
+    });
+    renderStages();
+  }
+
+  function autoReview(key, run) {
+    var current = function () { return auto && run === autoRuns; };
+    showStep(5);
+    stage('review', 'active');
+    $('autoCreate').disabled = false;
+    var prompt = RV.buildReviewPrompt(state.lesson);
+    $('reviewPromptText').textContent = prompt;
+    var sig = RV.signature(state.lesson);
+    G.reviewLesson(key, prompt, function () {
+      if (current()) stage('review', 'active', 'תקלה זמנית, מנסים שוב…');
+    }).then(function (text) {
+      if (!current()) return;
+      $('reviewResponse').value = text; // kept in the (closed) paste box, as if pasted
+      var n = parseReview();
+      if (RV.signature(state.lesson) !== sig) flowMsg(msgBox('info', 'השיעור השתנה בזמן הבדיקה; ייתכן שחלק מההצעות כבר לא מתאימות.'));
+      if (n < 0) {
+        stage('review', 'fail', 'לא הצלחתי לקרוא את תשובת הבדיקה');
+        stage('approve', 'skip');
+        readyForNikud(false);
+        return;
+      }
+      stage('review', 'done', n ? 'נמצאו ' + (n === 1 ? 'הצעה אחת' : n + ' הצעות') : 'לא נמצא מה לתקן');
+      if (n > 0) {
+        auto.waitingApproval = true;
+        stage('approve', 'wait', 'אשרו או דחו כל הצעה (בחלק 1 למטה)');
+        return;
+      }
+      stage('approve', 'skip');
+      readyForNikud(false);
+    }, function (e) {
+      if (!current()) return;
+      stage('review', 'fail', 'בדיקת הטקסט לא הצליחה');
+      stage('approve', 'skip');
+      flowMsg(msgBox('warn', ((e && e.message) || 'בדיקת הטקסט האוטומטית לא הצליחה.'),
+        ['אפשר לבדוק ידנית: "יצירת פרומפט ביקורת" בחלק 1, והדבקה לכל צ׳אט. אפשר גם לדלג על הבדיקה.']));
+      readyForNikud(false);
+    });
+  }
+
+  // Called after every approve / reject. The last decision is a click, so Dicta may open in a new window.
+  function reviewDecided() {
+    if (!auto || !auto.waitingApproval) return;
+    if ($('reviewList').querySelector('.review-item:not(.accepted):not(.rejected)')) return;
+    auto.waitingApproval = false;
+    stage('approve', 'done');
+    readyForNikud(true);
+  }
+
+  // gesture: inside a click, so window.open is allowed.
+  function readyForNikud(gesture) {
+    if (!auto) return;
+    if (!nikudRequired()) { stage('nikud', 'skip', 'בלי ניקוד'); autoFinished(); return; }
+    if (nikudDone()) { nikudStageDone(); return; }
+    if (gesture && DB.known()) {
+      stage('nikud', 'active');
+      autoNikud();
+      return;
+    }
+    stage('nikud', 'wait', DB.known()
+      ? 'לחצו על "נקד אוטומטית בדיקטה" (חלק 2)'
+      : 'נקדו בדיקטה (חלק 2): בכפתור האוטומטי אם התוסף מותקן, או ידנית');
+    var btn = $('autoNikud');
+    btn.classList.remove('pop');
+    void btn.offsetWidth;
+    btn.classList.add('pop');
+    $('nikudPart').scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  function nikudStageDone() {
+    if (!auto || !nikudRequired() || !nikudDone()) return;
+    stage('nikud', 'done');
+    autoFinished();
+  }
+
+  function nikudStageFailed() {
+    if (!auto || !auto.stages.nikud.state || auto.stages.nikud.state === 'done') return;
+    stage('nikud', 'wait', 'הניקוד האוטומטי לא הושלם: אפשר לנסות שוב או לנקד ידנית (חלק 2)');
+  }
+
+  function autoFinished() {
+    if (!auto || auto.waitingApproval) return;
+    if (auto.stages.approve.state === 'wait') return;
+    flowMsg(el('div', null,
+      msgBox('ok', 'השיעור מוכן ✓'),
+      el('div', { class: 'row' }, actionBtn('יצירת קישור ←', goToLink, true))));
   }
 
   /* ---------- Step 6: link ---------- */
@@ -831,6 +1091,11 @@
       copy(RV.plainText(state.lesson), 'הטקסט הועתק בלי ניקוד. עכשיו הדביקו אותו בנקדן של דיקטה.');
     });
     $('autoNikud').addEventListener('click', autoNikud);
+    $('autoCreate').addEventListener('click', autoCreate);
+    $('checkKey').addEventListener('click', checkKey);
+    $('deleteKey').addEventListener('click', deleteKey);
+    $('autoFlowClose').addEventListener('click', function () { $('autoFlow').hidden = true; });
+    syncGemini();
     $('compareNikud').addEventListener('click', compareNikud);
     $('copyLink').addEventListener('click', function () { copy(state.link, 'הקישור הועתק!'); });
     $('downloadJson').addEventListener('click', downloadJson);
@@ -839,6 +1104,7 @@
       window.print();
     });
     $('newLesson').addEventListener('click', function () {
+      cancelAuto();
       $('response').value = '';
       U.clear($('parseMsgs'));
       $('fixBox').hidden = true;

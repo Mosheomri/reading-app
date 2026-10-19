@@ -38,11 +38,15 @@ Suggested structure:
 /js/hebrew.js       nikud helpers (strip, normalize, word matching)
 /js/lesson.js       schema validation, encode/decode link
 /js/dicta.js        automatic nikud: opens Dicta and talks with the userscript
+/js/gemini.js       Gemini API: model constant, key, structured output, errors and retry
+/gemini-setup.html  how to get a Gemini API key (teacher)
 /js/lz-string.min.js
 /dicta-setup.html   setup instructions for the Dicta bridge (teacher)
 /userscripts/dicta-bridge.user.js   Tampermonkey script that runs on Dicta's site
 ```
 - The Dicta bridge (section 3, step 5) is optional: without the userscript everything works by copy-paste.
+- The Gemini mode (section 3.0) is optional too: the teacher's own key, requests go straight from the browser
+  to Google. Copy-paste with any chat stays available at all times.
 
 ---
 
@@ -84,6 +88,44 @@ The settings form and the editor list the levels from this file. The chosen leve
 settings and in the lesson (`level`); the editor can change it. The review prompt (step 5) asks the second AI to
 check that the text fits the lesson's level, and to report mismatches as `style` suggestions with the reason
 "לא מתאים לרמה". Lessons made before levels have `level: ""`, and their review prompt has no level check.
+
+### 3.0 Automatic mode with Gemini (optional)
+- **Key** (step 1, a collapsible box "✨ יצירה אוטומטית עם Gemini"): a password field to paste a Google AI Studio
+  key, "בדוק מפתח" and "מחק מפתח", and a note not to keep a key on a shared computer. "בדוק מפתח" reads the
+  model's details (`GET v1beta/models/{MODEL}`, no tokens); only a valid key is saved, in `localStorage`
+  (`readingApp.geminiKey`) only. Instructions page: `gemini-setup.html` (create a key in AI Studio step by step;
+  optional: restrict it to the website `mosheomri.github.io/*` and to the Gemini API; privacy note: on the free
+  tier Google may use the content, so no identifying details about a child).
+- **API**: `POST https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent` from the
+  browser, key in the `x-goog-api-key` header (never in the URL). `MODEL` is one constant at the top of
+  `js/gemini.js`: `gemini-3.8-flash` (stable, has a free tier; checked in the official pricing and models pages,
+  October 2026). Structured output: `generationConfig.responseMimeType = 'application/json'` and a
+  `responseSchema` (OpenAPI subset): the lesson schema mirrors the prompt's example (section 5), with `answer` as
+  a string for all exercise types ("0", "true"), which `Lesson.coerce` already accepts; the review schema is the
+  list the review prompt asks for.
+- **Flow** after "✨ צור שיעור" (shown next to "יצירת פרומפט" once a key is saved), with a stage list on top of
+  the page (⏳ active, ✓ done, ✕ failed, 👆 the teacher's turn, – skipped):
+  1. **כותב סיפור…**: the same prompt as copy-paste (`buildPrompt`). The JSON goes into the step 3 box.
+  2. **בודק את השיעור…**: the same checks as a paste (`analyzeResponse`: extract, coerce, sort order exercises,
+     `Lesson.check`). Errors stop the flow; warnings only go on (they show in the preview).
+  3. **בודק טקסט…**: a separate call with the existing review prompt (`Review.buildReviewPrompt`). The check
+     step opens and the suggestions are shown for approval exactly as after a paste.
+  4. **מחכה לאישור ההצעות**: when the last suggestion is approved or rejected, the flow goes on. That last
+     decision is a click, so Dicta may open in a new window then (popups need a user gesture).
+  5. **מנקד בדיקטה…**: if the Dicta bridge answered before in this browser (`readingApp.dictaBridge`, set on its
+     "ready", cleared when it does not answer), automatic nikud starts. Otherwise (or with no suggestions, when
+     there is no click to open a window from) it is the teacher's turn: the auto-nikud button is highlighted and
+     the manual steps are there. No nikud mode: skipped.
+  6. "השיעור מוכן ✓" with a button to the link.
+- **Errors** (clear Hebrew message, the copy-paste flow with the prompt ready in step 2, and "↻ לנסות שוב"):
+  invalid key (400 `API_KEY_INVALID`, 401, 403), quota (429), no network, timeout (120 s), blocked
+  (`promptFeedback.blockReason`, safety finish), cut (`MAX_TOKENS`), empty answer, a lesson that fails the checks
+  (its problems listed, and "לראות את התשובה ולתקן" opens it in step 3 with the usual fix message).
+  **One automatic retry** (after 4 s) for temporary errors only: network, timeout, 5xx. Not for 429 or a bad key.
+  A review error does not stop the flow: message, manual review offered, then nikud.
+- Leaving the flow (new lesson, loading a file, pasting a response, "יצירת פרומפט") cancels it; late answers
+  from a cancelled run are ignored.
+- **Tests**: `tests/gemini.py`, against a mock API (Playwright routing).
 
 ### Step 2: Prompt
 - Generate the prompt (section 6) from the form values.

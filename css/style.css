@@ -508,6 +508,24 @@ body.play.has-nav .read-bar { bottom: var(--nav-h); padding-bottom: 10px; }
 .auto-nikud .msgs { margin-bottom: 0; }
 .msg a { color: inherit; font-weight: 600; }
 
+/* Gemini: key box (step 1) and the automatic flow's stage list */
+.gemini-box { margin-top: 20px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; background: #fdfcf9; }
+.gemini-box > summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+.gemini-box[open] > summary { margin-bottom: 8px; }
+input.code-input { direction: ltr; text-align: left; font-family: Consolas, 'Courier New', monospace; font-size: 0.9rem; }
+.auto-flow { border-color: var(--primary); }
+.auto-stages { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.auto-stages li { display: flex; gap: 10px; align-items: center; color: var(--muted); }
+.auto-stages .icon { width: 1.6em; text-align: center; flex: 0 0 auto; }
+.auto-stages li.active { color: var(--ink); font-weight: 600; }
+.auto-stages li.active .icon { animation: pulse 1.2s ease-in-out infinite; }
+.auto-stages li.done { color: var(--good); }
+.auto-stages li.fail { color: var(--bad); font-weight: 600; }
+.auto-stages li.wait { color: #7a5212; font-weight: 600; }
+.auto-stages li.skip { opacity: 0.6; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .auto-stages li.active .icon { animation: none; } }
+
 /* Dicta bridge setup page */
 .setup-steps { padding-inline-start: 0; list-style: none; counter-reset: step; }
 .setup-steps > li { counter-increment: step; position: relative; padding-inline-start: 52px; margin-bottom: 22px; }

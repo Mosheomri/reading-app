@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;600;700&display=swap">
-  <link rel="stylesheet" href="css/style.css?v=8">
+  <link rel="stylesheet" href="css/style.css?v=9">
 </head>
 <body>
   <div class="wrap" id="wrap">
@@ -25,6 +25,16 @@
       <li data-step="5">5. בדיקה</li>
       <li data-step="6">6. קישור</li>
     </ol>
+
+    <!-- Automatic flow with Gemini: stage list, filled by builder.js -->
+    <section id="autoFlow" class="card auto-flow" hidden>
+      <div class="row">
+        <strong class="grow">✨ יצירה אוטומטית</strong>
+        <button type="button" class="btn small quiet" id="autoFlowClose">הסתרה</button>
+      </div>
+      <ol class="auto-stages" id="autoStages" aria-live="polite"></ol>
+      <div class="msgs" id="autoFlowMsgs"></div>
+    </section>
 
     <!-- Step 1: settings -->
     <section id="step1" class="card" hidden>
@@ -76,9 +86,29 @@
         <div class="msgs" id="settingsMsgs"></div>
 
         <div class="row">
-          <button type="submit" class="btn primary big">יצירת פרומפט ←</button>
+          <button type="button" class="btn primary big" id="autoCreate" hidden>✨ צור שיעור</button>
+          <button type="submit" class="btn primary big" id="makePrompt">יצירת פרומפט ←</button>
         </div>
+        <p class="muted small" id="autoCreateHint" style="margin-top:8px" hidden>
+          "צור שיעור" כותב את השיעור עם Gemini, בודק אותו ומכין את הניקוד. "יצירת פרומפט" מתאים להעתקה לכל צ׳אט (גם ChatGPT).
+        </p>
       </form>
+
+      <details class="gemini-box" id="geminiBox">
+        <summary>✨ יצירה אוטומטית עם Gemini <span class="muted small">(לא חובה)</span> <span class="tag" id="geminiState" hidden>מפתח שמור</span></summary>
+        <p class="small">עם מפתח חינמי של Gemini, האתר כותב את השיעור ובודק אותו בעצמו, בלי להעתיק ולהדביק.
+          <a href="gemini-setup.html" target="_blank" rel="noopener">איך מקבלים מפתח?</a></p>
+        <div class="field">
+          <label for="geminiKey">מפתח Gemini API</label>
+          <input type="password" id="geminiKey" class="code-input" autocomplete="off" spellcheck="false" placeholder="הדביקו כאן את המפתח">
+          <div class="hint">⚠️ המפתח נשמר רק בדפדפן הזה. אל תשמרו מפתח במחשב משותף (למשל בחדר המורים), ומחקו אותו כשמסיימים.</div>
+        </div>
+        <div class="row">
+          <button type="button" class="btn small" id="checkKey">בדוק מפתח</button>
+          <button type="button" class="btn small danger" id="deleteKey">מחק מפתח</button>
+        </div>
+        <div class="msgs" id="geminiMsgs"></div>
+      </details>
 
       <hr style="border:none;border-top:1px solid var(--line);margin:24px 0 16px">
       <div class="row">
@@ -268,16 +298,17 @@
   <!-- Filled by the print button; only the print stylesheet shows it. -->
   <div id="printArea"></div>
 
-  <script src="js/lz-string.min.js?v=8"></script>
-  <script src="js/hebrew.js?v=8"></script>
-  <script src="js/util.js?v=8"></script>
-  <script src="js/lesson.js?v=8"></script>
-  <script src="js/render.js?v=8"></script>
-  <script src="js/levels.js?v=8"></script>
-  <script src="js/prompt.js?v=8"></script>
-  <script src="js/review.js?v=8"></script>
-  <script src="js/print.js?v=8"></script>
-  <script src="js/dicta.js?v=8"></script>
-  <script src="js/builder.js?v=8"></script>
+  <script src="js/lz-string.min.js?v=9"></script>
+  <script src="js/hebrew.js?v=9"></script>
+  <script src="js/util.js?v=9"></script>
+  <script src="js/lesson.js?v=9"></script>
+  <script src="js/render.js?v=9"></script>
+  <script src="js/levels.js?v=9"></script>
+  <script src="js/prompt.js?v=9"></script>
+  <script src="js/review.js?v=9"></script>
+  <script src="js/print.js?v=9"></script>
+  <script src="js/dicta.js?v=9"></script>
+  <script src="js/gemini.js?v=9"></script>
+  <script src="js/builder.js?v=9"></script>
 </body>
 </html>

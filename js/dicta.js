@@ -16,6 +16,15 @@
 
   var current = null;
 
+  // Remembered once the script answered here, so the automatic flow can open Dicta without asking.
+  var STORE_KNOWN = 'readingApp.dictaBridge';
+  function known() {
+    try { return !!localStorage.getItem(STORE_KNOWN); } catch (e) { return false; }
+  }
+  function remember(on) {
+    try { if (on) localStorage.setItem(STORE_KNOWN, '1'); else localStorage.removeItem(STORE_KNOWN); } catch (e) { /* ignore */ }
+  }
+
   // handlers: {status(kind, info), result(text), fail(reason, message)}
   //   status kinds: 'opening', 'working' ({part, parts})
   //   fail reasons: 'blocked' (popup blocked), 'missing' (no script), 'closed', 'error' (from the script), 'timeout'
@@ -31,6 +40,7 @@
     var readyTimer = setTimeout(function () {
       if (sent) return;
       end();
+      remember(false);
       handlers.fail('missing');
     }, config.readyTimeout);
     var workTimer = null;
@@ -45,6 +55,7 @@
       if (d.type === 'ready') {
         if (sent) return;
         sent = true;
+        remember(true);
         clearTimeout(readyTimer);
         win.postMessage({ source: 'reading-app', type: 'nikud', id: id, text: text }, ORIGIN);
         var parts = Math.max(1, Math.ceil(text.length / 5000));
@@ -86,5 +97,5 @@
 
   function running() { return !!current; }
 
-  window.DictaBridge = { ORIGIN: ORIGIN, config: config, start: start, cancel: cancel, running: running };
+  window.DictaBridge = { ORIGIN: ORIGIN, config: config, start: start, cancel: cancel, running: running, known: known };
 })();

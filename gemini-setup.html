@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>מפתח Gemini – הוראות</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E📖%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="css/style.css?v=9">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>✨ מפתח חינמי ל-Gemini</h1>
+      <p class="muted">עם מפתח של Gemini, האתר כותב את השיעור ובודק אותו בעצמו: לוחצים על <strong>"✨ צור שיעור"</strong> ומחכים.
+        את המפתח יוצרים פעם אחת, בחינם, ב-Google AI Studio. בלי מפתח אפשר תמיד להמשיך בהעתק-הדבק, עם כל צ׳אט.</p>
+    </header>
+
+    <section class="card">
+      <ol class="setup-steps">
+        <li>
+          <h3>נכנסים ל-Google AI Studio</h3>
+          <p>פותחים את <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener">עמוד המפתחות ב-Google AI Studio</a>
+            ומתחברים עם חשבון Google. בכניסה הראשונה מאשרים את תנאי השימוש.</p>
+        </li>
+        <li>
+          <h3>יוצרים מפתח</h3>
+          <ol>
+            <li>לוחצים על <strong>"Create API key"</strong> (יצירת מפתח).</li>
+            <li>אם מתבקשים לבחור פרויקט, בוחרים את הפרויקט שמוצע (או יוצרים חדש) ומאשרים.</li>
+            <li>המפתח מופיע ברשימה: מחרוזת ארוכה של אותיות ומספרים באנגלית. לוחצים על כפתור ההעתקה שלידו.</li>
+          </ol>
+          <p class="muted small">אין צורך בכרטיס אשראי. המפתח החינמי מוגבל במספר הבקשות לדקה וליום; את המגבלות המדויקות רואים ב-AI Studio.
+            לשיעור אחד צריך שתי בקשות בלבד (כתיבה ובדיקה).</p>
+        </li>
+        <li>
+          <h3>מדביקים את המפתח באתר</h3>
+          <ol>
+            <li>חוזרים ל<a href="index.html">בניית שיעור</a>, ובשלב 1 פותחים את <strong>"✨ יצירה אוטומטית עם Gemini"</strong>.</li>
+            <li>מדביקים את המפתח בשדה ולוחצים על <strong>"בדוק מפתח"</strong>. אם הכל תקין, המפתח נשמר בדפדפן הזה ומופיע הכפתור <strong>"✨ צור שיעור"</strong>.</li>
+          </ol>
+        </li>
+        <li>
+          <h3>(לא חובה) מגבילים את המפתח לאתר הזה</h3>
+          <p>כך גם אם מישהו יעתיק את המפתח, הוא לא יעבוד באתר אחר.</p>
+          <ol>
+            <li>פותחים את <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">עמוד ה-Credentials ב-Google Cloud</a>, ובוחרים למעלה את אותו פרויקט.</li>
+            <li>לוחצים על שם המפתח.</li>
+            <li>תחת <strong>"Application restrictions"</strong> בוחרים <strong>"Websites"</strong>, ומוסיפים את הכתובת
+              <code class="addr">mosheomri.github.io/*</code></li>
+            <li>תחת <strong>"API restrictions"</strong> משאירים רק את <strong>Generative Language API</strong> (ב-AI Studio זה נקרא "Restrict to Gemini API only").</li>
+            <li>לוחצים <strong>"Save"</strong>. השינוי יכול לקחת כמה דקות.</li>
+          </ol>
+          <p class="muted small">אחרי ההגבלה המפתח יעבוד רק מהאתר הזה, ולא מתוכנות אחרות או מהמחשב של מפתח האתר.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>שמירה על המפתח</h2>
+      <ul>
+        <li>המפתח נשמר <strong>רק בדפדפן שלכם</strong> (ב-localStorage), ונשלח רק ל-Google. הוא לא נשלח לשום מקום אחר.</li>
+        <li><strong>אל תשמרו מפתח במחשב משותף</strong> (למשל בחדר המורים). אם השתמשתם בו, לחצו על <strong>"מחק מפתח"</strong> בסוף.</li>
+        <li>אם המפתח דלף, מוחקים אותו ב-AI Studio ויוצרים חדש.</li>
+      </ul>
+      <h2>פרטיות</h2>
+      <ul>
+        <li>במסלול החינמי Google רשאית להשתמש בתוכן הבקשות כדי לשפר את המוצרים שלה. <strong>אל תכתבו בנושא השיעור פרטים מזהים על ילד</strong> (שם מלא, בית ספר, מידע רפואי או אישי).</li>
+        <li>לבינה נשלחים רק ההגדרות של השיעור (נושא, רמה, אורך, מילים) והטקסט של השיעור לבדיקה.</li>
+      </ul>
+      <h2>אם משהו לא עובד</h2>
+      <ul>
+        <li><strong>"המפתח לא תקין":</strong> ודאו שהעתקתם את כל המפתח, בלי רווחים. אם הגבלתם אותו לאתר, בדקו שהכתובת נכתבה נכון.</li>
+        <li><strong>"נגמרה המכסה":</strong> המסלול החינמי מוגבל לדקה וליום. חכו כמה דקות, או נסו מחר.</li>
+        <li>תמיד אפשר להמשיך בהעתק-הדבק: הפרומפט מוכן בשלב 2, לכל צ׳אט.</li>
+      </ul>
+      <p><a href="index.html">→ חזרה לבניית שיעור</a></p>
+    </section>
+  </div>
+</body>
+</html>
