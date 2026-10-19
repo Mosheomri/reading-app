@@ -136,6 +136,8 @@
       title: str(raw.title),
       topic: str(raw.topic),
       nikudMode: NIKUD_MODES.indexOf(raw.nikudMode) !== -1 ? raw.nikudMode : 'full',
+      // Reading level id from js/levels.js; '' for lessons made before levels (the child page has no list).
+      level: window.Levels ? window.Levels.valid(raw.level) : str(raw.level),
       targetWords: raw.targetWords.map(function (t) {
         if (typeof t === 'string') return { word: str(t), emoji: '' };
         t = t || {};
@@ -338,6 +340,7 @@
       title: lesson.title,
       topic: lesson.topic,
       nikudMode: lesson.nikudMode,
+      level: lesson.level || '',
       targetWords: lesson.targetWords.map(function (t) { return { word: t.word, emoji: t.emoji }; }),
       story: lesson.story,
       exercises: lesson.exercises.filter(function (ex) { return !ex.unknown; })

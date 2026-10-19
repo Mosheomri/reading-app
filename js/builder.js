@@ -99,8 +99,18 @@
       wordsMode: document.querySelector('input[name="wordsMode"]:checked').value,
       wordCount: parseInt($('wordCount').value, 10),
       wordListText: $('wordList').value,
-      nikud: document.querySelector('input[name="nikud"]:checked').value
+      nikud: document.querySelector('input[name="nikud"]:checked').value,
+      level: document.querySelector('input[name="level"]:checked').value
     };
+  }
+
+  // Radio buttons for the reading levels, from js/levels.js. Returns the label elements.
+  function levelRadios(name, checkedId, onChange) {
+    return window.Levels.LIST.map(function (lv) {
+      var radio = el('input', { type: 'radio', name: name, value: lv.id, checked: lv.id === checkedId });
+      if (onChange) radio.addEventListener('change', function () { onChange(lv.id); });
+      return el('label', { class: 'choice' }, radio, ' ' + lv.label);
+    });
   }
 
   function fillForm(s) {
@@ -113,6 +123,8 @@
     if (wm) wm.checked = true;
     var nk = document.querySelector('input[name="nikud"][value="' + s.nikud + '"]');
     if (nk) nk.checked = true;
+    var lv = document.querySelector('input[name="level"][value="' + s.level + '"]');
+    if (lv) lv.checked = true;
     syncWordsMode();
   }
 
@@ -137,7 +149,7 @@
 
     save(STORE_SETTINGS, f);
     state.settings = f;
-    state.request = { topic: f.topic, length: f.length, wordsMode: f.wordsMode, wordCount: f.wordCount, words: words };
+    state.request = { topic: f.topic, length: f.length, level: f.level, wordsMode: f.wordsMode, wordCount: f.wordCount, words: words };
     $('promptText').textContent = window.buildPrompt(state.request);
     showStep(2);
   }
@@ -177,6 +189,7 @@
     var lesson = c.lesson;
     if (state.settings) {
       lesson.nikudMode = state.settings.nikud;
+      lesson.level = state.settings.level;
       if (!lesson.topic) lesson.topic = state.settings.topic;
     }
     // Automatic fixes are shown as warnings but not sent back to the AI.
@@ -292,6 +305,11 @@
         radio.addEventListener('change', function () { lesson.nikudMode = m; changed(); });
         return el('label', { class: 'choice' }, radio, ' ' + modeNames[m]);
       }))));
+
+    // Used by the review prompt; empty for lesson files made before levels.
+    root.appendChild(el('div', { class: 'field' },
+      el('span', { class: 'label' }, 'רמת קריאה'),
+      el('div', { class: 'choices' }, levelRadios('edLevel', lesson.level, function (id) { lesson.level = id; changed(); }))));
 
     // Target words
     var twBox = el('div', { class: 'field' }, el('span', { class: 'label' }, 'מילות יעד ואימוג׳י'));
@@ -721,6 +739,7 @@
   /* ---------- Wire up ---------- */
 
   function init() {
+    levelRadios('level', window.Levels.DEFAULT).forEach(function (n) { $('levelChoices').appendChild(n); });
     fillForm(load(STORE_SETTINGS));
     document.querySelectorAll('input[name="wordsMode"]').forEach(function (r) { r.addEventListener('change', syncWordsMode); });
     $('settingsForm').addEventListener('submit', submitSettings);
@@ -752,6 +771,10 @@
     $('compareNikud').addEventListener('click', compareNikud);
     $('copyLink').addEventListener('click', function () { copy(state.link, 'הקישור הועתק!'); });
     $('downloadJson').addEventListener('click', downloadJson);
+    $('printBtn').addEventListener('click', function () {
+      U.clear($('printArea')).appendChild(window.Print.build(state.lesson, { answers: $('printAnswers').checked }));
+      window.print();
+    });
     $('newLesson').addEventListener('click', function () {
       $('response').value = '';
       U.clear($('parseMsgs'));

@@ -32,15 +32,17 @@ with sync_playwright() as p:
     page.reload()
 
     # ---------- 3. Length as paragraphs/sentences ----------
-    shapes = page.evaluate("[20, 55, 100, 128, 200, 400].map(storyShape)")
+    # Level ג׳–ד׳: 8 words per sentence
+    shapes = page.evaluate("[20, 55, 100, 128, 200, 400].map(n => storyShape(n, '3-4'))")
     for n, s in zip([20, 55, 100, 128, 200, 400], shapes): print("   ", n, "→", s)
-    check(shapes[3] == "4 פסקאות, בכל פסקה 4 משפטים קצרים, סך הכול בערך 128 מילים", "128 words → 4×4 + total")
-    check(shapes[0] == "פסקה אחת, עם 3 משפטים קצרים, סך הכול בערך 20 מילים", "20 words → one paragraph + total")
+    check(shapes[3] == "4 פסקאות, בכל פסקה 4 משפטים, סך הכול בערך 128 מילים", "128 words → 4×4 + total")
+    check(shapes[0] == "פסקה אחת, עם 3 משפטים, סך הכול בערך 20 מילים", "20 words → one paragraph + total")
     page.fill("#topic", "כלב בגינה")
     page.fill("#length", "128")
     page.click("button[type=submit]")
     prompt = page.text_content("#promptText")
-    check("אורך הסיפור: 4 פסקאות, בכל פסקה 4 משפטים קצרים, סך הכול בערך 128 מילים." in prompt, "prompt uses paragraph/sentence shape + total words")
+    # Default level סוף א׳–ב׳: 5.5 words per sentence → 23 sentences → 6 paragraphs of 4
+    check("אורך הסיפור: 6 פסקאות, בכל פסקה 4 משפטים, סך הכול בערך 128 מילים." in prompt, "prompt uses paragraph/sentence shape + total words")
     page.click("#step2 [data-go='3']")
     page.fill("#response", json.dumps(sample, ensure_ascii=False))
     page.click("#parseBtn")

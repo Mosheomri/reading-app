@@ -21,26 +21,32 @@
   };
 
   // AIs follow paragraph/sentence counts better than word counts.
-  var WORDS_PER_SENTENCE = 8;
+  // Words per sentence comes from the reading level (js/levels.js).
   var SENTENCES_PER_PARAGRAPH = 4;
 
-  // e.g. 128 words → "4 פסקאות, בכל פסקה 4 משפטים קצרים, סך הכול בערך 128 מילים"
-  function storyShape(length) {
-    var sentences = Math.max(2, Math.round(length / WORDS_PER_SENTENCE));
+  function levelOf(id) {
+    return window.Levels.get(id) || window.Levels.get(window.Levels.DEFAULT);
+  }
+
+  // e.g. 128 words at level ג׳–ד׳ (8 words per sentence) → "4 פסקאות, בכל פסקה 4 משפטים, סך הכול בערך 128 מילים"
+  function storyShape(length, levelId) {
+    var sentences = Math.max(2, Math.round(length / levelOf(levelId).wordsPerSentence));
     var paragraphs = Math.max(1, Math.round(sentences / SENTENCES_PER_PARAGRAPH));
     var perParagraph = Math.max(1, Math.round(sentences / paragraphs));
     var total = ', סך הכול בערך ' + length + ' מילים';
-    if (paragraphs === 1) return 'פסקה אחת, עם ' + perParagraph + ' משפטים קצרים' + total;
-    return paragraphs + ' פסקאות, בכל פסקה ' + perParagraph + ' משפטים קצרים' + total;
+    if (paragraphs === 1) return 'פסקה אחת, עם ' + perParagraph + ' משפטים' + total;
+    return paragraphs + ' פסקאות, בכל פסקה ' + perParagraph + ' משפטים' + total;
   }
 
-  // settings: {topic, length, wordsMode: 'number'|'list', wordCount, words: []}
+  // settings: {topic, length, level, wordsMode: 'number'|'list', wordCount, words: []}
   function buildPrompt(settings) {
+    var level = levelOf(settings.level);
     var lines = [
       'אתה כותב תוכן ללימוד קריאה לילד בהוראה מותאמת.',
       '',
       'כתוב סיפור קצר בעברית בנושא: ' + settings.topic,
-      'אורך הסיפור: ' + storyShape(settings.length) + '.'
+      'רמת קריאה: ' + level.label + '.',
+      'אורך הסיפור: ' + storyShape(settings.length, level.id) + '.'
     ];
     if (settings.wordsMode === 'list') {
       lines.push('מילות היעד: ' + settings.words.join(', ') + '. כל מילת יעד חייבת להופיע בסיפור לפחות פעמיים.');
@@ -50,14 +56,18 @@
     lines.push(
       '',
       'הנחיות לסיפור:',
-      '- משפטים קצרים ופשוטים, שפה של ילדים.',
+      '- שפה של ילדים, מותאמת לרמת הקריאה.',
+      '- ' + level.sentence
+    );
+    level.language.forEach(function (l) { lines.push('- ' + l); });
+    lines.push(
       '- כתוב את כל הטקסט בלי ניקוד בכלל: הכותרת, הסיפור, המילים, השאלות והתשובות.',
       '- כתוב בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר).',
       '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה.',
       '- אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד.',
       '',
       'תרגילים:',
-      '- 3 שאלות הבנה אמריקאיות (3 אפשרויות כל אחת).',
+      '- 3 שאלות הבנה אמריקאיות (3 אפשרויות כל אחת). ' + level.questions,
       '- 2 משפטי נכון/לא נכון.',
       '- 2 משפטים להשלמת מילה חסרה (סמן את החסר ב-___), עם 3 אפשרויות.',
       '- תרגיל סידור אחד: 4 משפטים מהסיפור, בסדר הנכון.',

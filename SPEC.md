@@ -33,6 +33,8 @@ Suggested structure:
 /js/games/*.js      one file per game
 /js/exercises.js
 /js/reading.js      paced reading modes on the child's reading screen
+/js/levels.js       reading levels (prompt guidelines, words per sentence)
+/js/print.js        printable worksheet and answer page
 /js/hebrew.js       nikud helpers (strip, normalize, word matching)
 /js/lesson.js       schema validation, encode/decode link
 /js/lz-string.min.js
@@ -56,9 +58,28 @@ Suggested structure:
 | Field | Type | Notes |
 |---|---|---|
 | Topic (נושא) | free text | required |
+| Reading level (רמת קריאה) | גן–תחילת א׳ / סוף א׳–ב׳ / ג׳–ד׳ / ה׳–ו׳ | default סוף א׳–ב׳; see below |
 | Story length (אורך) | number of words | e.g. 100; range 20–400 |
 | Target words (מילות יעד) | either a number (AI chooses) or a list typed by teacher | 2–10 words |
 | Nikud (ניקוד) | full / partial / none | partial = only target words vocalized |
+
+#### Reading levels – `js/levels.js`
+All level settings live in one file, so they are easy to tune. Each level has an id (stored in the lesson
+as `level`), a label, an average number of words per sentence (turns the requested length into paragraphs and
+sentences, section 6), prompt lines about sentence length, vocabulary and syntax, and a line about the kind of
+comprehension questions:
+
+| Level | id | Words / sentence | Language | Questions |
+|---|---|---|---|---|
+| גן–תחילת א׳ | `k-1` | 4 (3–5) | everyday words, simple sentences, mostly present tense | only direct: the answer is written in the story |
+| סוף א׳–ב׳ | `1-2` | 5.5 (4–7) | joining with ו / כי, few descriptions | direct, plus one simple comprehension question |
+| ג׳–ד׳ | `3-4` | 8 (6–10) | simple complex sentences (ש, כאשר), wider vocabulary | one inference question |
+| ה׳–ו׳ | `5-6` | 11 (8–14) | longer sentences, connectives (אבל, לכן, למרות ש…), expressions | two inference questions |
+
+The settings form and the editor list the levels from this file. The chosen level is saved with the teacher's
+settings and in the lesson (`level`); the editor can change it. The review prompt (step 5) asks the second AI to
+check that the text fits the lesson's level, and to report mismatches as `style` suggestions with the reason
+"לא מתאים לרמה". Lessons made before levels have `level: ""`, and their review prompt has no level check.
 
 ### Step 2: Prompt
 - Generate the prompt (section 6) from the form values.
@@ -101,6 +122,22 @@ Suggested structure:
 - Build the link, show it, "העתק קישור" button and "שלח בוואטסאפ" button (`https://wa.me/?text=...`).
 - "פתח לבדיקה" button that opens `play.html` with the lesson.
 - Button to download the lesson JSON (backup) and to load a JSON file back for editing.
+- **"🖨️ הדפסה"** button and a checkbox **"לכלול דף תשובות"**. The button builds a worksheet (`js/print.js`)
+  into a hidden `#printArea` on the teacher page and calls `window.print()`. A print stylesheet shows only that
+  area: A4 (`@page`), large font (text 16pt, story 18pt, line height 2 for nikud), black borders instead of
+  backgrounds (browsers skip backgrounds when printing).
+  - Content: a "שם: ___ תאריך: ___" line, the title, the target words with their emoji, the story (target words
+    bold and underlined), then the exercises, numbered, each with a short instruction:
+    `mcq` – options with a circle to mark; `tf` – "נכון" / "לא נכון" with squares; `fill` – the sentence with a
+    blank line and a word bank (dashed frame) of its options; `order` – the sentences shuffled, with a box for
+    the number next to each.
+  - Everything follows the lesson's nikud mode (section 7), including the instructions.
+  - Options, word banks and order sentences are shuffled once with a PRNG seeded from the lesson content
+    (FNV-1a hash of the lesson JSON + mulberry32), so the same lesson always prints the same sheet and the answer
+    page matches it. A shuffle that keeps the original order is retried.
+  - A question never splits across pages (`break-inside: avoid`).
+  - With the checkbox, a separate page (`break-before: page`) lists the correct answers: the option text, נכון /
+    לא נכון, the missing word, and for `order` each printed sentence with the number that belongs next to it.
 
 ---
 
@@ -132,6 +169,11 @@ Child can replay a game or press "הלאה".
     so the text never moves).
   - Marks change only background / box-shadow / visibility, never size or spacing, so text sizing keeps working
     during playback. Works in all nikud modes (words are counted without nikud).
+  - Punctuation touching a word is part of it: it is marked with the word and vanishes with it. That covers
+    punctuation after the word (`קָטָן.`, `טוֹב!"`, a maqaf) and before it (an opening quote: `"כֶּלֶב`).
+    `Render.story` wraps each word with its punctuation in a `<span class="unit">` (the inner
+    `<span class="word">` keeps the target highlight and tap-to-speak); text between two words is split at
+    its whitespace. Punctuation standing alone between spaces (a dash) is not attached to any word.
 - **Pace**: words per minute, 20–120. Three big buttons 🐢 🐇 🚀 (30 / 60 / 90) and a slider (step 5),
   with the value shown ("60 מילים בדקה"). Default 60. The last pace is saved in `localStorage`
   (`readingApp.pace`); a change applies from the next word.
@@ -139,6 +181,10 @@ Child can replay a game or press "הלאה".
   `1 + (letters − 5) × 0.1`, clamped to 0.7–1.6 (a 5-letter word takes exactly the base time).
   Extra stop after the last word of a sentence (`.` `!` `?` `…` in the text after it): +1 base;
   after the last word of a paragraph: +2 base (instead of the sentence stop).
+  Where the stop falls depends on the mode (the total time is the same):
+  - סימון מתקדם: the mark stays on the sentence's last word for its time plus the stop.
+  - מילים נעלמות: the last word (with its punctuation) vanishes after its own time; the stop runs after it is
+    gone, before the next word's time starts. So nothing is still shown that belongs to the finished sentence.
 - **Playback controls** (sticky at the bottom of the screen while reading): התחל / עצור, מילה אחורה,
   מההתחלה. Switching mode stops and resets to the start. At the end of the story playback stops and offers
   "עוד פעם" (restart) or "הלאה" (to the exercises). Leaving the screen stops the timer.
@@ -164,6 +210,7 @@ Types (rendered one at a time):
   "title": "כֶּלֶב בַּגִּנָּה",
   "topic": "כלבים",
   "nikudMode": "full",
+  "level": "1-2",
   "targetWords": [
     { "word": "כֶּלֶב", "emoji": "🐕" },
     { "word": "גִּנָּה", "emoji": "🌳" }
@@ -201,19 +248,22 @@ Written in Hebrew. Placeholders in `{}`.
 אתה כותב תוכן ללימוד קריאה לילד בהוראה מותאמת.
 
 כתוב סיפור קצר בעברית בנושא: {topic}
-אורך הסיפור: {P} פסקאות, בכל פסקה {S} משפטים קצרים, סך הכול בערך {length} מילים.
+רמת קריאה: {level label}.
+אורך הסיפור: {P} פסקאות, בכל פסקה {S} משפטים, סך הכול בערך {length} מילים.
 {IF words given} מילות היעד: {words}. כל מילת יעד חייבת להופיע בסיפור לפחות פעמיים.
 {IF number given} בחר {n} מילות יעד פשוטות ומוחשיות שקשורות לנושא. כל מילה חייבת להופיע בסיפור לפחות פעמיים.
 
 הנחיות לסיפור:
-- משפטים קצרים ופשוטים, שפה של ילדים.
+- שפה של ילדים, מותאמת לרמת הקריאה.
+- {level sentence line}
+- {level language lines, one per line}
 - כתוב את כל הטקסט בלי ניקוד בכלל: הכותרת, הסיפור, המילים, השאלות והתשובות.
 - כתוב בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר).
 - לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה.
 - אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד.
 
 תרגילים:
-- 3 שאלות הבנה אמריקאיות (3 אפשרויות כל אחת).
+- 3 שאלות הבנה אמריקאיות (3 אפשרויות כל אחת). {level questions line}
 - 2 משפטי נכון/לא נכון.
 - 2 משפטים להשלמת מילה חסרה (סמן את החסר ב-___), עם 3 אפשרויות.
 - תרגיל סידור אחד: 4 משפטים מהסיפור, בסדר הנכון.
@@ -223,7 +273,7 @@ Written in Hebrew. Placeholders in `{}`.
 {schema example from section 5, without nikud and without nikudMode}
 ```
 
-- The length is given as paragraphs and sentences (about 8 words per sentence, 4 sentences per paragraph),
+- The length is given as paragraphs and sentences (the level's words per sentence, 4 sentences per paragraph),
   because AIs follow those better than a word count, plus the total word count.
 - The AI writes **without nikud**: its nikud is unreliable. Nikud comes from Dicta in step 5.
 - The template lives in `js/prompt.js` so it is easy to tune.

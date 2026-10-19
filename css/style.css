@@ -400,8 +400,9 @@ body.play .wrap { max-width: 900px; padding-top: 0; }
   .read-bar .btn { padding: 8px 12px; font-size: 0.95rem; }
   .read-bar .btn[data-act="play"] { min-width: 96px; }
 }
-.story .word.current { background: var(--current); box-shadow: 0 0 0 2px var(--primary); border-radius: 6px; }
-.story .word.gone { visibility: hidden; }
+.story .unit.current { background: var(--current); box-shadow: 0 0 0 2px var(--primary); border-radius: 6px; }
+.story .unit.current .word.target { background: transparent; } /* the current mark wins over the target highlight */
+.story .unit.gone { visibility: hidden; }
 .read-end { margin-top: 16px; }
 
 /* Exercises */
@@ -530,3 +531,40 @@ body.play .wrap { max-width: 900px; padding-top: 0; }
 .review-item.style .kind { background: #e7e5e2; color: #55595e; }
 .review-item.accepted { border-color: var(--good); background: var(--good-soft); }
 .fix-note { color: #2a5870; margin: 0 0 8px; }
+
+/* ---------- Printable worksheet (index.html #printArea, filled by js/print.js) ---------- */
+#printArea { display: none; }
+@media print {
+  @page { size: A4; margin: 14mm 14mm 16mm; }
+  html, body { background: #fff; }
+  body > :not(#printArea) { display: none !important; }
+  #printArea { display: block; }
+}
+/* Marks are borders, not backgrounds: browsers skip backgrounds when printing by default. */
+.print-sheet { color: #000; font-family: var(--font); font-size: 16pt; line-height: 1.6; text-align: right; }
+.print-sheet .p-head { display: flex; justify-content: space-between; gap: 12mm; margin-bottom: 6mm; }
+.print-sheet .p-fill { display: inline-block; width: 60mm; border-bottom: 1.5px solid #000; }
+.print-sheet .p-fill.short { width: 35mm; }
+.print-sheet .p-title { font-size: 24pt; text-align: center; margin: 0 0 4mm; }
+.print-sheet .p-targets { display: flex; flex-wrap: wrap; justify-content: center; gap: 4mm 8mm; margin-bottom: 6mm; font-size: 18pt; }
+.print-sheet .p-target { border: 1.5px solid #000; border-radius: 999px; padding: 0 4mm; }
+.print-sheet .p-story { font-size: 18pt; line-height: 2; margin-bottom: 8mm; }
+.print-sheet .p-story p { margin: 0 0 3mm; }
+.print-sheet .p-story .word.target { background: none; padding: 0; font-weight: 700; text-decoration: underline; text-underline-offset: 0.25em; }
+.print-sheet .p-section { font-size: 18pt; margin: 6mm 0 4mm; break-after: avoid; page-break-after: avoid; }
+.print-sheet .p-q { break-inside: avoid; page-break-inside: avoid; margin-bottom: 7mm; }
+.print-sheet .p-instr { font-size: 12pt; color: #333; }
+.print-sheet .p-num { font-weight: 700; }
+.print-sheet .p-options, .print-sheet .p-order { list-style: none; margin: 2mm 0 0; padding: 0 6mm 0 0; }
+.print-sheet .p-options li, .print-sheet .p-order li { margin: 2mm 0; }
+.print-sheet .p-mark { display: inline-block; vertical-align: middle; border: 2px solid #000; margin-inline-end: 3mm; }
+.print-sheet .p-circle { width: 5mm; height: 5mm; border-radius: 50%; }
+.print-sheet .p-square { width: 5mm; height: 5mm; }
+.print-sheet .p-box { width: 9mm; height: 8mm; }
+.print-sheet .p-tf { display: flex; gap: 14mm; margin-top: 2mm; padding-inline-start: 6mm; }
+.print-sheet .p-line { display: inline-block; width: 30mm; border-bottom: 2px solid #000; margin: 0 0.5mm; }
+.print-sheet .p-bank { display: inline-flex; flex-wrap: wrap; gap: 3mm 8mm; margin-top: 2mm; padding: 1.5mm 5mm; border: 2px dashed #000; border-radius: 3mm; }
+.print-sheet .p-answers { break-before: page; page-break-before: always; font-size: 14pt; }
+.print-sheet .p-answers li { margin: 2mm 0; }
+.print-sheet .p-order-key { list-style: none; margin: 1mm 0 0; padding: 0; }
+.print-sheet .p-key { display: inline-block; min-width: 7mm; padding: 0 1.5mm; margin-inline-end: 3mm; border: 1.5px solid #000; text-align: center; font-weight: 700; }

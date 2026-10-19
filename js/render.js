@@ -32,7 +32,34 @@
     return out;
   }
 
-  // Story as <p> elements; target words wrapped in <span class="target">.
+  // Punctuation touching a word belongs to it: text between two words is split at its whitespace,
+  // the part before the first whitespace closes the previous word ("קָטָן."), the part after the last
+  // whitespace opens the next one ("כֶּלֶב). Text with no whitespace (a maqaf) stays with the previous word.
+  // Returns [{space, lead, word, trail}]: `space` is the loose text before the unit (whitespace, a dash
+  // between spaces); a last entry with word null holds what follows the last word.
+  function storyUnits(para) {
+    var units = [];
+    var pending = ''; // text before the next word that is not yet assigned
+    H.tokenize(para).forEach(function (seg) {
+      if (seg.isWord) {
+        var m = pending.match(/^([\s\S]*\s)?(\S*)$/);
+        units.push({ space: m[1] || '', lead: m[2], word: seg.text, trail: '' });
+        pending = '';
+        return;
+      }
+      var last = units[units.length - 1];
+      if (!last) { pending += seg.text; return; }
+      var ws = seg.text.search(/\s/);
+      if (ws === -1) { last.trail += seg.text; return; }
+      last.trail += seg.text.slice(0, ws);
+      pending = seg.text.slice(ws);
+    });
+    if (units.length) units.push({ space: pending, lead: '', word: null, trail: '' });
+    return units;
+  }
+
+  // Story as <p> elements. Each word is a <span class="unit"> holding the punctuation attached to it
+  // and a <span class="word"> (target words also get class "target").
   // onWordTap(fullyVocalizedWord) makes every word tappable.
   // mark: flag unvocalized words (teacher preview).
   function story(lesson, onWordTap, mark) {
@@ -41,17 +68,18 @@
     lesson.story.split(/\n+/).forEach(function (para) {
       if (!para.trim()) return;
       var p = el('p');
-      H.tokenize(para).forEach(function (seg) {
-        if (!seg.isWord) { p.appendChild(document.createTextNode(seg.text)); return; }
-        var isTarget = H.matchesAny(seg.text, targets);
-        var shown = H.displayText(seg.text, lesson.nikudMode, targets);
+      storyUnits(para).forEach(function (u) {
+        if (u.space) p.appendChild(document.createTextNode(u.space));
+        if (u.word === null) return;
+        var isTarget = H.matchesAny(u.word, targets);
+        var shown = H.displayText(u.word, lesson.nikudMode, targets);
         var span = el('span', { class: 'word' + (isTarget ? ' target' : '') +
-          (mark && flagUnvocalized(lesson, seg.text) ? ' no-nikud' : '') }, shown);
+          (mark && flagUnvocalized(lesson, u.word) ? ' no-nikud' : '') }, shown);
         if (onWordTap) {
           span.classList.add('tappable');
-          span.addEventListener('click', function () { onWordTap(seg.text); });
+          span.addEventListener('click', function () { onWordTap(u.word); });
         }
-        p.appendChild(span);
+        p.appendChild(el('span', { class: 'unit' }, u.lead || null, span, u.trail || null));
       });
       frag.appendChild(p);
     });
@@ -71,5 +99,5 @@
     return out;
   }
 
-  window.Render = { targetsOf: targetsOf, text: text, markedText: markedText, story: story, fillSentence: fillSentence };
+  window.Render = { targetsOf: targetsOf, text: text, markedText: markedText, storyUnits: storyUnits, story: story, fillSentence: fillSentence };
 })();

@@ -55,13 +55,22 @@
     return out;
   }
 
-  // How long a word stays current, in ms.
-  function wordDelay(word, wpm, after) {
-    var base = 60000 / clampPace(wpm);
+  // Time for reading the word itself, in ms.
+  function wordTime(word, wpm) {
     var letters = H.bare(word).length;
     var factor = Math.max(MIN_FACTOR, Math.min(MAX_FACTOR, 1 + (letters - AVERAGE_LETTERS) * LETTER_WEIGHT));
+    return Math.round(60000 / clampPace(wpm) * factor);
+  }
+
+  // Extra stop after a word that ends a sentence or a paragraph, in ms.
+  function pauseTime(after, wpm) {
     var pause = after === 'paragraph' ? PARAGRAPH_PAUSE : after === 'sentence' ? SENTENCE_PAUSE : 0;
-    return Math.round(base * (factor + pause));
+    return Math.round(60000 / clampPace(wpm) * pause);
+  }
+
+  // Time from a word starting until the next one starts: the word plus the stop after it.
+  function wordDelay(word, wpm, after) {
+    return wordTime(word, wpm) + pauseTime(after, wpm);
   }
 
   function loadPace() {
@@ -83,7 +92,8 @@
   // opts: {reader, story: lesson.story, onNext: fn}
   // Returns {top: modes + pace (above the story), bar: playback (below it, sticky), end: end-of-story box, destroy}.
   function controller(opts) {
-    var words = Array.prototype.slice.call(opts.reader.querySelectorAll('.story .word'));
+    // One unit per word: the word with the punctuation touching it, so both are marked and vanish together.
+    var words = Array.prototype.slice.call(opts.reader.querySelectorAll('.story .unit'));
     var steps = plan(opts.story);
     var n = Math.min(words.length, steps.length);
     var mode = 'normal';
@@ -155,9 +165,19 @@
       }
     }
 
-    function schedule() {
+    // Highlight: the mark stays on a sentence's last word during the stop after it.
+    // Vanish: that word disappears after its own time, then the stop runs on the gone word,
+    // before the next word's time (afterTick: the previous word has just vanished).
+    function schedule(afterTick) {
       clearTimeout(timer);
-      timer = setTimeout(tick, wordDelay(steps[index].word, pace, steps[index].after));
+      var step = steps[index];
+      var ms;
+      if (mode === 'vanish') {
+        ms = wordTime(step.word, pace) + (afterTick && index > 0 ? pauseTime(steps[index - 1].after, pace) : 0);
+      } else {
+        ms = wordDelay(step.word, pace, step.after);
+      }
+      timer = setTimeout(tick, ms);
     }
 
     function tick() {
@@ -166,7 +186,7 @@
       if (index >= n) { finish(); return; }
       paint();
       follow();
-      schedule();
+      schedule(true);
     }
 
     function play() {
@@ -239,6 +259,8 @@
     PACES: PACES,
     clampPace: clampPace,
     plan: plan,
+    wordTime: wordTime,
+    pauseTime: pauseTime,
     wordDelay: wordDelay,
     controller: controller
   };

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;600;700&display=swap">
-  <link rel="stylesheet" href="css/style.css?v=3">
+  <link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
   <div class="wrap" id="wrap">
@@ -33,6 +33,12 @@
         <div class="field">
           <label for="topic">נושא</label>
           <input type="text" id="topic" required placeholder="למשל: כלב בגינה">
+        </div>
+
+        <div class="field">
+          <span class="label">רמת קריאה</span>
+          <div class="choices" id="levelChoices"></div>
+          <div class="hint">משפיעה על אורך המשפטים, אוצר המילים וסוג השאלות.</div>
         </div>
 
         <div class="field">
@@ -231,6 +237,12 @@
         <a class="btn" id="waLink" target="_blank" rel="noopener">💬 שלח בוואטסאפ</a>
         <a class="btn" id="openLink" target="_blank" rel="noopener">▶️ פתח לבדיקה</a>
       </div>
+      <h3>דף עבודה להדפסה</h3>
+      <p class="muted small">הסיפור והתרגילים על דף A4, לפי מצב הניקוד. סדר האפשרויות מעורבב, וקבוע לאותו שיעור.</p>
+      <div class="row" style="margin-bottom:16px">
+        <button type="button" class="btn" id="printBtn">🖨️ הדפסה</button>
+        <label class="choice"><input type="checkbox" id="printAnswers"> לכלול דף תשובות</label>
+      </div>
       <h3>גיבוי</h3>
       <p class="muted small">שמרו את קובץ השיעור כדי לערוך אותו שוב בעתיד (בעמוד הראשון: "טעינת קובץ שיעור").</p>
       <div class="row" style="margin-bottom:16px">
@@ -244,13 +256,18 @@
     </section>
   </div>
 
-  <script src="js/lz-string.min.js?v=3"></script>
-  <script src="js/hebrew.js?v=3"></script>
-  <script src="js/util.js?v=3"></script>
-  <script src="js/lesson.js?v=3"></script>
-  <script src="js/render.js?v=3"></script>
-  <script src="js/prompt.js?v=3"></script>
-  <script src="js/review.js?v=3"></script>
-  <script src="js/builder.js?v=3"></script>
+  <!-- Filled by the print button; only the print stylesheet shows it. -->
+  <div id="printArea"></div>
+
+  <script src="js/lz-string.min.js?v=6"></script>
+  <script src="js/hebrew.js?v=6"></script>
+  <script src="js/util.js?v=6"></script>
+  <script src="js/lesson.js?v=6"></script>
+  <script src="js/render.js?v=6"></script>
+  <script src="js/levels.js?v=6"></script>
+  <script src="js/prompt.js?v=6"></script>
+  <script src="js/review.js?v=6"></script>
+  <script src="js/print.js?v=6"></script>
+  <script src="js/builder.js?v=6"></script>
 </body>
 </html>
