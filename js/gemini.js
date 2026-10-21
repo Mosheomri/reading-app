@@ -18,7 +18,8 @@
 
   var config = {
     timeout: 120000,               // a plain request (checking the key)
-    idleTimeout: 45000,            // a streamed answer: no data at all for this long
+    firstDataTimeout: 120000,      // a streamed answer: nothing at all yet for this long (the model may think first)
+    idleTimeout: 45000,            // a streamed answer that has started: no new data for this long
     retryDelay: 4000,              // before the one automatic retry after another temporary error
     busyDelays: [2000, 5000, 10000] // server overloaded (503): up to 3 more tries, waiting this long before each
   };
@@ -50,44 +51,57 @@
     propertyOrdering: ['question', 'options', 'answer', 'sampleAnswer']
   };
 
-  // Same shape as the example in js/prompt.js. `answer` is a string for every exercise type;
-  // Lesson.coerce turns "0" into 0 and "true" into true.
+  var TARGET_WORDS = {
+    type: 'ARRAY',
+    items: {
+      type: 'OBJECT',
+      properties: { word: S, emoji: S },
+      required: ['word', 'emoji'],
+      propertyOrdering: ['word', 'emoji']
+    }
+  };
+  var STORY = { type: 'STRING', description: 'The whole story. Paragraphs separated by a newline.' };
+
+  // `answer` is a string for every exercise type; Lesson.coerce turns "0" into 0 and "true" into true.
+  var EXERCISES = {
+    type: 'ARRAY',
+    items: {
+      type: 'OBJECT',
+      properties: {
+        type: { type: 'STRING', enum: ['mcq', 'tf', 'fill', 'order', 'open', 'locate', 'message'] },
+        question: S,
+        statement: S,
+        sentence: { type: 'STRING', description: 'fill: the sentence with ___. locate: the sentence of the story that answers, word for word.' },
+        options: LIST,
+        sentences: LIST,
+        answer: { type: 'STRING', description: 'mcq / fill: the number of the right option, the first is "0". tf: "true" or "false". Other types: empty.' },
+        sampleAnswer: { type: 'STRING', description: 'open: a short sample answer.' },
+        visible: PART,
+        hidden: PART
+      },
+      required: ['type'],
+      propertyOrdering: ['type', 'question', 'statement', 'sentence', 'options', 'sentences', 'answer', 'sampleAnswer', 'visible', 'hidden']
+    }
+  };
+
+  // The automatic flow writes a lesson in two calls: the story (small, fast), then the exercises on it
+  // (window.buildStoryPrompt / buildExercisesPrompt in js/prompt.js).
+  var STORY_SCHEMA = {
+    type: 'OBJECT',
+    properties: { title: S, topic: S, targetWords: TARGET_WORDS, story: STORY },
+    required: ['title', 'topic', 'targetWords', 'story'],
+    propertyOrdering: ['title', 'topic', 'targetWords', 'story']
+  };
+  var EXERCISES_SCHEMA = {
+    type: 'OBJECT',
+    properties: { exercises: EXERCISES },
+    required: ['exercises']
+  };
+
+  // The whole lesson in one call: the same shape as the example in js/prompt.js.
   var LESSON_SCHEMA = {
     type: 'OBJECT',
-    properties: {
-      title: S,
-      topic: S,
-      targetWords: {
-        type: 'ARRAY',
-        items: {
-          type: 'OBJECT',
-          properties: { word: S, emoji: S },
-          required: ['word', 'emoji'],
-          propertyOrdering: ['word', 'emoji']
-        }
-      },
-      story: { type: 'STRING', description: 'The whole story. Paragraphs separated by a newline.' },
-      exercises: {
-        type: 'ARRAY',
-        items: {
-          type: 'OBJECT',
-          properties: {
-            type: { type: 'STRING', enum: ['mcq', 'tf', 'fill', 'order', 'open', 'locate', 'message'] },
-            question: S,
-            statement: S,
-            sentence: { type: 'STRING', description: 'fill: the sentence with ___. locate: the sentence of the story that answers, word for word.' },
-            options: LIST,
-            sentences: LIST,
-            answer: { type: 'STRING', description: 'mcq / fill: the number of the right option, the first is "0". tf: "true" or "false". Other types: empty.' },
-            sampleAnswer: { type: 'STRING', description: 'open: a short sample answer.' },
-            visible: PART,
-            hidden: PART
-          },
-          required: ['type'],
-          propertyOrdering: ['type', 'question', 'statement', 'sentence', 'options', 'sentences', 'answer', 'sampleAnswer', 'visible', 'hidden']
-        }
-      }
-    },
+    properties: { title: S, topic: S, targetWords: TARGET_WORDS, story: STORY, exercises: EXERCISES },
     required: ['title', 'topic', 'targetWords', 'story', 'exercises'],
     propertyOrdering: ['title', 'topic', 'targetWords', 'story', 'exercises']
   };
@@ -123,7 +137,8 @@
     quota: 'נגמרה המכסה החינמית של Gemini לעכשיו. נסו שוב בעוד כמה דקות (או מחר, אם נגמרה המכסה היומית).',
     network: 'אין חיבור ל-Gemini. בדקו את החיבור לאינטרנט ונסו שוב.',
     timeout: 'Gemini לא ענה בזמן.',
-    idle: 'Gemini הפסיק לשלוח נתונים (45 שניות בלי תשובה).',
+    first: 'Gemini לא התחיל לענות ({s} שניות).',
+    idle: 'Gemini הפסיק לשלוח נתונים ({s} שניות בלי תשובה).',
     blocked: 'Gemini סירב לכתוב את התוכן הזה. נסו לנסח את הנושא אחרת.',
     cut: 'התשובה של Gemini נקטעה באמצע.',
     server: 'יש תקלה זמנית אצל Gemini.',
@@ -157,7 +172,8 @@
   // One line per request in the console: what, how long, HTTP status, error. Never the key.
   function log(info) {
     var line = '[Gemini] ' + info.call + ' (' + (info.model || MODEL) + '): ' + (info.status ? 'HTTP ' + info.status : 'no response') +
-      ', ' + (info.ms / 1000).toFixed(1) + ' s' + (info.chars != null ? ', ' + info.chars + ' chars' : '') +
+      ', ' + (info.ms / 1000).toFixed(1) + ' s' + (info.first != null ? ' (first data after ' + (info.first / 1000).toFixed(1) + ' s)' : '') +
+      (info.chars != null ? ', ' + info.chars + ' chars' : '') +
       (info.finish ? ', finish ' + info.finish : '') + (info.attempt > 1 ? ', retry' : '') +
       (info.error ? ' – ' + info.error : '');
     if (info.error) console.warn(line); else console.info(line);
@@ -167,9 +183,12 @@
     return Object.assign({ 'x-goog-api-key': key }, json ? { 'Content-Type': 'application/json' } : {});
   }
 
-  function networkError(e, idle) {
-    return e && e.name === 'AbortError' ? new GeminiError('timeout', idle ? MESSAGES.idle : MESSAGES.timeout)
-      : new GeminiError('network', MESSAGES.network);
+  // waited: what an abort means – 'first' (no data yet in a stream), 'idle' (a stream stopped), or a plain request.
+  function networkError(e, waited) {
+    if (!e || e.name !== 'AbortError') return new GeminiError('network', MESSAGES.network);
+    if (waited === 'first') return new GeminiError('timeout', MESSAGES.first.replace('{s}', Math.round(config.firstDataTimeout / 1000)));
+    if (waited === 'idle') return new GeminiError('timeout', MESSAGES.idle.replace('{s}', Math.round(config.idleTimeout / 1000)));
+    return new GeminiError('timeout', MESSAGES.timeout);
   }
 
   // What went wrong, for the console: the browser's error and our message.
@@ -202,26 +221,34 @@
       return data;
     }, function (e) {
       clearTimeout(timer);
-      var err = e instanceof GeminiError ? e : networkError(e, false);
+      var err = e instanceof GeminiError ? e : networkError(e, 'request');
       log({ call: call, status: status, ms: Date.now() - t0, attempt: attempt, error: logError(e, err) });
       throw err;
     });
   }
 
-  // A streamed generateContent (server-sent events). The timer starts again on every piece of data, so an
-  // answer that keeps coming is never cut; it fires only after config.idleTimeout with no data at all.
-  // onProgress(chars) after every chunk. Resolves with the text.
+  // A streamed generateContent (server-sent events). Until the first piece of the answer arrives the timer is
+  // config.firstDataTimeout (the model may think a while first); after that it starts again on every piece, with
+  // config.idleTimeout, so an answer that keeps coming is never cut. Thought summaries (includeThoughts) count as
+  // data but are left out of the text.
+  // onProgress(chars, {thinking}) after every chunk; thinking: thoughts came and no answer text yet. Resolves with the text.
   function stream(call, model, key, body, attempt, onProgress) {
     var url = API + model + ':streamGenerateContent?alt=sse';
     var t0 = Date.now();
+    var first = null; // ms to the first piece of the answer
     var status = 0;
     var ctrl = new AbortController();
     var timer = null;
-    function alive() {
+    function wait(ms) {
       clearTimeout(timer);
-      timer = setTimeout(function () { ctrl.abort(); }, config.idleTimeout);
+      timer = setTimeout(function () { ctrl.abort(); }, ms);
+    }
+    function alive() {
+      if (first === null) first = Date.now() - t0;
+      wait(config.idleTimeout);
     }
     var text = '';
+    var thoughts = 0;
     var finish = '';
     var blocked = '';
     var streamError = null;
@@ -234,16 +261,16 @@
       var c = data.candidates && data.candidates[0];
       if (!c) return;
       ((c.content && c.content.parts) || []).forEach(function (part) {
-        if (part.text && !part.thought) text += part.text;
+        if (part.thought) thoughts++;
+        else if (part.text) text += part.text;
       });
       if (c.finishReason) finish = c.finishReason;
-      if (onProgress) onProgress(text.length);
+      if (onProgress) onProgress(text.length, { thinking: thoughts > 0 && !text });
     }
 
-    alive();
+    wait(config.firstDataTimeout);
     return fetch(url, { method: 'POST', headers: headers(key, true), body: JSON.stringify(body), signal: ctrl.signal }).then(function (res) {
       status = res.status;
-      alive();
       if (!res.ok) return readError(res);
       var reader = res.body.getReader();
       var decoder = new TextDecoder();
@@ -273,12 +300,12 @@
       if (blocked || /SAFETY|PROHIBITED|BLOCKLIST|SPII/.test(finish)) throw new GeminiError('blocked', MESSAGES.blocked);
       if (finish === 'MAX_TOKENS') throw new GeminiError('cut', MESSAGES.cut);
       if (!text.trim()) throw new GeminiError('empty', MESSAGES.empty);
-      log({ call: call, model: model, status: status, ms: Date.now() - t0, attempt: attempt, chars: text.length, finish: finish || '?' });
+      log({ call: call, model: model, status: status, ms: Date.now() - t0, first: first, attempt: attempt, chars: text.length, finish: finish || '?' });
       return text;
     }).catch(function (e) {
       clearTimeout(timer);
-      var err = e instanceof GeminiError ? e : networkError(e, true);
-      log({ call: call, model: model, status: status, ms: Date.now() - t0, attempt: attempt, chars: text.length, error: logError(e, err) });
+      var err = e instanceof GeminiError ? e : networkError(e, first === null ? 'first' : 'idle');
+      log({ call: call, model: model, status: status, ms: Date.now() - t0, first: first, attempt: attempt, chars: text.length, error: logError(e, err) });
       throw err;
     });
   }
@@ -319,7 +346,9 @@
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: schema,
-        thinkingConfig: { thinkingLevel: level }
+        // includeThoughts: thought summaries stream while the model thinks, so the idle timer keeps going
+        // and the teacher sees "חושב…". They are not part of the answer.
+        thinkingConfig: { thinkingLevel: level, includeThoughts: true }
       }
     };
     var call = opts.call || 'generate';
@@ -338,7 +367,7 @@
   // Sends one prompt, streamed; resolves with the JSON text of the reply (matching `schema`).
   // If the model stays overloaded after its retries, switches to FALLBACK_MODEL and stays with it
   // (for the next calls too) until resetModel().
-  // opts: {call: name for the console, onRetry(err, info), onProgress(chars), onFallback(model)}
+  // opts: {call: name for the console, onRetry(err, info), onProgress(chars, {thinking}), onFallback(model)}
   function generate(key, prompt, schema, opts) {
     opts = opts || {};
     var model = activeModel;
@@ -361,6 +390,8 @@
     currentModel: function () { return activeModel; },
     resetModel: function () { activeModel = MODEL; },
     LESSON_SCHEMA: LESSON_SCHEMA,
+    STORY_SCHEMA: STORY_SCHEMA,
+    EXERCISES_SCHEMA: EXERCISES_SCHEMA,
     REVIEW_SCHEMA: REVIEW_SCHEMA,
     GeminiError: GeminiError,
     getKey: getKey,
@@ -369,6 +400,8 @@
     checkKey: checkKey,
     generate: generate,
     writeLesson: function (key, prompt, opts) { return generate(key, prompt, LESSON_SCHEMA, Object.assign({ call: 'write-lesson' }, opts)); },
+    writeStory: function (key, prompt, opts) { return generate(key, prompt, STORY_SCHEMA, Object.assign({ call: 'write-story' }, opts)); },
+    writeExercises: function (key, prompt, opts) { return generate(key, prompt, EXERCISES_SCHEMA, Object.assign({ call: 'write-exercises' }, opts)); },
     reviewLesson: function (key, prompt, opts) { return generate(key, prompt, REVIEW_SCHEMA, Object.assign({ call: 'review-text' }, opts)); }
   };
 })();

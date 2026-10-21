@@ -1,4 +1,6 @@
-/* The AI prompt template. Kept in one place so it is easy to tune. Exposes window.buildPrompt. */
+/* The AI prompt template. Kept in one place so it is easy to tune.
+   Exposes window.buildPrompt (the whole lesson, for copy-paste) and, for the automatic flow with Gemini,
+   window.buildStoryPrompt and window.buildExercisesPrompt (the same lesson in two calls). */
 (function () {
   'use strict';
 
@@ -22,19 +24,25 @@
     }
   };
 
-  function schemaExample(counts, messageStyle) {
+  function storyExample() {
     return {
-      version: 1,
       title: 'כותרת',
       topic: 'הנושא',
       targetWords: [
         { word: 'מילה', emoji: '🙂' }
       ],
-      story: 'הסיפור המלא.\nפסקה חדשה אחרי שורה חדשה.',
-      exercises: window.Levels.TYPES.filter(function (t) { return counts[t.id] > 0; }).map(function (t) {
-        return t.id === 'message' ? EXAMPLES.message[messageStyle] : EXAMPLES[t.id];
-      })
+      story: 'הסיפור המלא.\nפסקה חדשה אחרי שורה חדשה.'
     };
+  }
+
+  function exercisesExample(counts, messageStyle) {
+    return window.Levels.TYPES.filter(function (t) { return counts[t.id] > 0; }).map(function (t) {
+      return t.id === 'message' ? EXAMPLES.message[messageStyle] : EXAMPLES[t.id];
+    });
+  }
+
+  function schemaExample(counts, messageStyle) {
+    return Object.assign({ version: 1 }, storyExample(), { exercises: exercisesExample(counts, messageStyle) });
   }
 
   // "3 שאלות" / "שאלה אחת": n with the noun (singular for one).
@@ -83,13 +91,20 @@
     return paragraphs + ' פסקאות, בכל פסקה ' + perParagraph + ' משפטים' + total;
   }
 
-  // settings: {topic, length, level, wordsMode: 'number'|'list', wordCount, words: [],
-  //            exercises: {mcq: n, tf: n, ...} (optional: the level's defaults)}
-  function buildPrompt(settings) {
-    var level = levelOf(settings.level);
-    var counts = settings.exercises || window.Levels.exerciseDefaults(level.id);
+  var INTRO = 'אתה כותב תוכן ללימוד קריאה לילד בהוראה מותאמת.';
+  // Rules for every text the AI writes (story and exercises).
+  var NO_NIKUD = '- כתוב את כל הטקסט בלי ניקוד בכלל: הכותרת, הסיפור, המילים, השאלות והתשובות.';
+  var KTIV = '- כתוב בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר).';
+  var NO_EMOJI = '- אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד.';
+
+  function countsOf(settings, level) {
+    return settings.exercises || window.Levels.exerciseDefaults(level.id);
+  }
+
+  // The story part of the prompt: topic, level, length, target words and the language rules.
+  function storyLines(settings, level) {
     var lines = [
-      'אתה כותב תוכן ללימוד קריאה לילד בהוראה מותאמת.',
+      INTRO,
       '',
       'כתוב סיפור קצר בעברית בנושא: ' + settings.topic,
       'רמת קריאה: ' + level.label + '.',
@@ -107,14 +122,17 @@
       '- ' + level.sentence
     );
     level.language.forEach(function (l) { lines.push('- ' + l); });
-    lines.push(
-      '- כתוב את כל הטקסט בלי ניקוד בכלל: הכותרת, הסיפור, המילים, השאלות והתשובות.',
-      '- כתוב בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר).',
-      '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה.',
-      '- אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד.',
-      '',
-      'תרגילים (בסדר הזה):'
-    );
+    lines.push(NO_NIKUD, KTIV, '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה.', NO_EMOJI);
+    return lines;
+  }
+
+  // settings: {topic, length, level, wordsMode: 'number'|'list', wordCount, words: [],
+  //            exercises: {mcq: n, tf: n, ...} (optional: the level's defaults)}
+  function buildPrompt(settings) {
+    var level = levelOf(settings.level);
+    var counts = countsOf(settings, level);
+    var lines = storyLines(settings, level);
+    lines.push('', 'תרגילים (בסדר הזה):');
     exerciseLines(counts, level).forEach(function (l) { lines.push(l); });
     lines.push(
       '',
@@ -125,6 +143,49 @@
     return lines.join('\n');
   }
 
+  // First call of the automatic flow: the story and the target words only.
+  function buildStoryPrompt(settings) {
+    var lines = storyLines(settings, levelOf(settings.level));
+    lines.push('', 'החזר JSON בדיוק במבנה הזה:', JSON.stringify(storyExample(), null, 2));
+    return lines.join('\n');
+  }
+
+  // Second call: the exercises on the story the first call wrote ({title, targetWords, story}).
+  function buildExercisesPrompt(settings, story) {
+    var level = levelOf(settings.level);
+    var counts = countsOf(settings, level);
+    var lines = [
+      INTRO,
+      '',
+      'זה סיפור לילד ברמת קריאה: ' + level.label + '.',
+      'הכותרת: ' + story.title,
+      'מילות היעד: ' + (story.targetWords || []).map(function (w) { return w.word; }).join(', '),
+      '',
+      'הסיפור:',
+      '---',
+      story.story,
+      '---',
+      '',
+      'כתוב תרגילים על הסיפור הזה (בסדר הזה):'
+    ];
+    exerciseLines(counts, level).forEach(function (l) { lines.push(l); });
+    lines.push(
+      '',
+      'הנחיות לתרגילים:',
+      '- כל תרגיל מבוסס על מה שכתוב בסיפור. משפט שלוקחים מהסיפור מועתק מילה במילה.',
+      '- שפה של ילדים, מותאמת לרמת הקריאה.',
+      NO_NIKUD,
+      KTIV,
+      NO_EMOJI,
+      '',
+      'החזר JSON בדיוק במבנה הזה (בדוגמה תרגיל אחד מכל סוג; כתוב את מספר התרגילים שביקשתי):',
+      JSON.stringify({ exercises: exercisesExample(counts, level.messageStyle) }, null, 2)
+    );
+    return lines.join('\n');
+  }
+
   window.buildPrompt = buildPrompt;
+  window.buildStoryPrompt = buildStoryPrompt;
+  window.buildExercisesPrompt = buildExercisesPrompt;
   window.storyShape = storyShape;
 })();

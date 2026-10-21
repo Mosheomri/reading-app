@@ -1,6 +1,6 @@
 """Automatic lesson with the Gemini API, against a mock API (Playwright routing: nothing goes to the network).
-Key box, structured-output requests, the flow (write → checks → review → approvals → nikud through the Dicta
-bridge mock), errors with one automatic retry, and the copy-paste fallback."""
+Key box, structured-output requests, the flow (story → exercises → checks → review → approvals → nikud through
+the Dicta bridge mock), timeouts, errors with one automatic retry, and the copy-paste fallback."""
 import json, sys, os, mimetypes
 from urllib.parse import urlparse, unquote
 from playwright.sync_api import sync_playwright
@@ -52,23 +52,37 @@ def api_error(status, message, reason=None, st="INVALID_ARGUMENT"):
     if reason: e["details"] = [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": reason}]
     return status, {"error": e}
 
+def split_lesson(lesson_json):
+    """The two answers of the automatic flow: the story (title, topic, targetWords, story) and {exercises}."""
+    lesson = json.loads(lesson_json)
+    story = {k: lesson[k] for k in ("title", "topic", "targetWords", "story")}
+    return json.dumps(story, ensure_ascii=False), json.dumps({"exercises": lesson["exercises"]}, ensure_ascii=False)
+
+def request_kind(body):
+    """write (the story) | exercises | review, from the responseSchema of the request."""
+    schema = body["generationConfig"]["responseSchema"]
+    if schema["type"] == "ARRAY": return "review"
+    return "write" if "story" in schema["properties"] else "exercises"
+
 class MockApi:
-    """Answers in order from queue[kind] (kind: models | write | review), else a default. 'abort' = network error.
-    With hold=True, write / review requests wait until release()."""
+    """Answers in order from queue[kind] (kind: models | write | exercises | review), else a default.
+    'abort' = network error, 'hang' = never answers. With hold=True, generate requests wait until release()."""
     def __init__(self, lesson_json, review_json="[]"):
-        self.queue = {"models": [], "write": [], "review": []}
+        self.queue = {"models": [], "write": [], "exercises": [], "review": []}
         self.log = []
         self.hold = False
         self.held = []
         self.hung = []
-        self.defaults = {"models": (200, {"name": "models/x"}), "write": reply(lesson_json), "review": reply(review_json)}
+        story_json, exercises_json = split_lesson(lesson_json)
+        self.defaults = {"models": (200, {"name": "models/x"}), "write": reply(story_json), "exercises": reply(exercises_json),
+                         "review": reply(review_json)}
 
     def handle(self, route):
         req = route.request
         if req.method == "OPTIONS":
             route.fulfill(status=204, headers=CORS); return
         body = json.loads(req.post_data) if req.post_data else None
-        kind = "models" if req.method == "GET" else ("review" if body["generationConfig"]["responseSchema"]["type"] == "ARRAY" else "write")
+        kind = "models" if req.method == "GET" else request_kind(body)
         model = req.url.split("/models/")[1].split(":")[0].split("?")[0]
         self.log.append({"kind": kind, "model": model, "url": req.url, "headers": req.headers, "body": body})
         if self.hold and kind != "models":
@@ -155,6 +169,7 @@ with sync_playwright() as p:
         if "answer" in ex: ex["answer"] = str(ex["answer"]).lower()
     plain.pop("nikudMode", None)
     LESSON_JSON = json.dumps(plain, ensure_ascii=False)
+    STORY_JSON, EXERCISES_JSON = split_lesson(LESSON_JSON)
     words = plain["story"].split()
     SUGGESTIONS = json.dumps([
         {"field": "story", "type": "error", "original": words[0], "fix": words[0] + "ים", "reason": "בדיקה"},
@@ -202,31 +217,55 @@ with sync_playwright() as p:
     page.wait_for_function("() => document.querySelector('#autoStages li.active')")
     check(page.is_visible("#autoFlow") and stage_of(page, "write")[1] == "active" and "כותב סיפור" in stage_of(page, "write")[2]
           and page.is_disabled("#autoCreate"), "progress: 'כותב סיפור…' while writing, button disabled")
+    check([s[0] for s in stages(page)] == ["write", "exercises", "check", "review", "approve", "nikud"], "stages: story and exercises are separate")
     page.wait_for_timeout(200)
+    check(mock.count("write") == 1 and mock.count("exercises") == 0, "the exercises wait for the story")
     w = [x for x in mock.log if x["kind"] == "write"][-1]
     gc = w["body"]["generationConfig"]
     check(w["url"] == API + "v1beta/models/" + MODEL + ":streamGenerateContent?alt=sse" and w["headers"].get("x-goog-api-key") == KEY,
-          "write: POST models/%s:streamGenerateContent?alt=sse (streamed) with the key header" % MODEL)
-    check(gc.get("thinkingConfig") == {"thinkingLevel": "low"}, "write: thinkingConfig.thinkingLevel = low (the lowest for this model)")
+          "story: POST models/%s:streamGenerateContent?alt=sse (streamed) with the key header" % MODEL)
+    check(gc.get("thinkingConfig") == {"thinkingLevel": "low", "includeThoughts": True},
+          "story: thinkingLevel = low (the lowest for this model), includeThoughts so thought summaries stream")
     check(gc["responseMimeType"] == "application/json" and gc["responseSchema"]["type"] == "OBJECT"
-          and set(gc["responseSchema"]["required"]) == {"title", "topic", "targetWords", "story", "exercises"}
-          and gc["responseSchema"]["properties"]["exercises"]["items"]["properties"]["type"]["enum"] == ["mcq", "tf", "fill", "order", "open", "locate", "message"],
-          "write: structured output (application/json + lesson responseSchema)")
-    check(w["body"]["contents"][0]["parts"][0]["text"] == page.text_content("#promptText"), "write: the same prompt as copy-paste")
+          and set(gc["responseSchema"]["required"]) == {"title", "topic", "targetWords", "story"} and "exercises" not in gc["responseSchema"]["properties"],
+          "story: structured output with the small story schema (no exercises)")
+    story_prompt = w["body"]["contents"][0]["parts"][0]["text"]
+    pasted = page.text_content("#promptText")
+    common = pasted.split("תרגילים (בסדר הזה):")[0]
+    check(story_prompt.startswith(common) and "תרגילים" not in story_prompt[len(common):] and '"story"' in story_prompt,
+          "story prompt: the story part of the copy-paste prompt, then the story structure only")
+    mock.release()
+    wait_stage(page, "exercises", "active")
+    page.wait_for_timeout(200)
+    x = [x for x in mock.log if x["kind"] == "exercises"][-1]
+    xgc = x["body"]["generationConfig"]
+    xp = x["body"]["contents"][0]["parts"][0]["text"]
+    check(set(xgc["responseSchema"]["required"]) == {"exercises"}
+          and xgc["responseSchema"]["properties"]["exercises"]["items"]["properties"]["type"]["enum"] == ["mcq", "tf", "fill", "order", "open", "locate", "message"]
+          and xgc["thinkingConfig"] == {"thinkingLevel": "low", "includeThoughts": True},
+          "exercises: a second call with the exercises schema")
+    check(plain["story"] in xp and plain["title"] in xp and all(t["word"] in xp for t in plain["targetWords"]) and "שאלות הבנה אמריקאיות" in xp,
+          "exercises prompt: the story Gemini wrote, its title and target words, and the exercises asked for")
+    check(stage_of(page, "write")[1] == "done" and "כותב תרגילים" in stage_of(page, "exercises")[2], "progress: story written, 'כותב תרגילים…'")
+    texts = page.evaluate("__stageTexts")
+    check(any("כותב סיפור: חושב…" in t for t in texts), "thought summaries before the answer: the teacher sees 'חושב…'")
+    notes = [t for t in texts if "נכתבו כבר" in t and "כותב סיפור" in t]
+    nums = [int("".join(c for c in t.split("נכתבו כבר")[1] if c.isdigit())) for t in notes]
+    js_len = page.evaluate("(s) => s.length", STORY_JSON)  # UTF-16 units, as the page counts
+    check(len(nums) >= 3 and nums == sorted(nums) and nums[-1] == js_len,
+          "progress while streaming: 'כותב סיפור… (נכתבו כבר X תווים)', growing to the whole answer (%s)" % nums)
     mock.release()
     wait_stage(page, "review", "active")
-    notes = [t for t in page.evaluate("__stageTexts") if "נכתבו כבר" in t]
-    nums = [int("".join(c for c in t.split("נכתבו כבר")[1] if c.isdigit())) for t in notes]
-    js_len = page.evaluate("document.querySelector('#response').value.length")  # UTF-16 units, as the page counts
-    check(len(nums) >= 3 and nums == sorted(nums) and nums[-1] == js_len and all("כותב סיפור" in t for t in notes),
-          "progress while streaming: 'כותב סיפור… (נכתבו כבר X תווים)', growing to the whole answer (%s)" % nums)
-    check(page.evaluate("JSON.parse(document.querySelector('#response').value).title") == plain["title"] and "thinking about it" not in page.input_value("#response"),
-          "streamed chunks joined into the answer; thought parts left out")
-    logs = [c for c in console if "[Gemini] write-lesson (" + MODEL + "): HTTP 200" in c]
-    check(len(logs) == 1 and " s, " in logs[0] and "%d chars" % js_len in logs[0] and "finish STOP" in logs[0],
-          "console: call, duration, HTTP status, length (%s)" % (logs[0] if logs else console[-3:]))
-    check(stage_of(page, "write")[1] == "done" and stage_of(page, "check")[1] == "done" and "בודק טקסט" in stage_of(page, "review")[2],
-          "progress: written, checked, 'בודק טקסט…'")
+    check(page.evaluate("JSON.parse(document.querySelector('#response').value).title") == plain["title"]
+          and page.evaluate("JSON.parse(document.querySelector('#response').value).exercises.length") == len(plain["exercises"])
+          and "thinking about it" not in page.input_value("#response"),
+          "story and exercises joined into one lesson; thought parts left out")
+    logs = [c for c in console if "[Gemini] write-story (" + MODEL + "): HTTP 200" in c]
+    check(len(logs) == 1 and " s (first data after " in logs[0] and "%d chars" % js_len in logs[0] and "finish STOP" in logs[0],
+          "console: call, duration, time to the first data, HTTP status, length (%s)" % (logs[0] if logs else console[-3:]))
+    check(any("[Gemini] write-exercises (" + MODEL + "): HTTP 200" in c for c in console), "console: the exercises call is logged too")
+    check(stage_of(page, "write")[1] == "done" and stage_of(page, "exercises")[1] == "done" and stage_of(page, "check")[1] == "done"
+          and "בודק טקסט" in stage_of(page, "review")[2], "progress: story, exercises, checked, 'בודק טקסט…'")
     check(page.is_visible("#step5"), "check step shown while the text is reviewed")
     page.wait_for_timeout(200)
     r = [x for x in mock.log if x["kind"] == "review"][-1]
@@ -309,20 +348,21 @@ with sync_playwright() as p:
     failing("cut answer", [reply(LESSON_JSON[:200], "MAX_TOKENS")], "נקטעה", 1)[1].close()
     failing("blocked", [("sse", [{"promptFeedback": {"blockReason": "SAFETY"}}])], "סירב", 1)[1].close()
 
-    # No data for the idle time (45 s; shortened here): timeout, retried once, then the message
+    # Nothing at all before the first-data time (120 s; shortened here): timeout, retried once, then the message
     mock = MockApi(LESSON_JSON)
     mock.queue["write"] = ["hang", "hang"]
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
-    page.evaluate("Gemini.config.idleTimeout = 1500")
+    check(page.evaluate("[Gemini.config.timeout, Gemini.config.firstDataTimeout, Gemini.config.idleTimeout]") == [120000, 120000, 45000],
+          "timeouts: 120 s for plain requests, 120 s to the first data of a stream, then 45 s between pieces")
+    page.evaluate("Gemini.config.firstDataTimeout = 1500")
     fill_form(page)
     page.click("#autoCreate")
     page.wait_for_function("() => document.querySelector('#autoStages li.fail')", timeout=15000)
-    check("הפסיק לשלוח נתונים" in flow_msgs(page) and mock.count("write") == 2 and "הפרומפט מוכן" in flow_msgs(page),
-          "no data for the idle time: timeout, one retry, message with the copy-paste way")
-    warn = [c for c in console if c.startswith("warning: [Gemini] write-lesson") and "הפסיק לשלוח נתונים" in c]
+    check("לא התחיל לענות (2 שניות)" in flow_msgs(page) and mock.count("write") == 2 and "הפרומפט מוכן" in flow_msgs(page),
+          "no data before the first-data time: timeout, one retry, message with the copy-paste way")
+    warn = [c for c in console if c.startswith("warning: [Gemini] write-story") and "לא התחיל לענות" in c]
     check(len(warn) == 2 and any(", retry" in c for c in warn), "console: both timed-out attempts logged as warnings (%s)" % warn[-1:])
-    check(page.evaluate("Gemini.config.idleTimeout") == 1500 and page.evaluate("Gemini.config.timeout") == 120000, "timeouts: 120 s for plain requests, idle timer for streams")
     for r in mock.hung:
         try: r.abort()
         except Exception: pass
@@ -355,6 +395,33 @@ with sync_playwright() as p:
     }""")
     check(got["text"] == "[1,1,1,1,1,1]" and got["ms"] > 2500 and got["seen"] == sorted(got["seen"]) and len(got["seen"]) == 7,
           "a slow stream that keeps sending is not cut by the idle timer (%d ms, progress %s)" % (got["ms"], got["seen"]))
+
+    # A stream that started (a thought summary) and then stops: the shorter idle timer, not the first-data one
+    got = page.evaluate("""async () => {
+      Gemini.config.firstDataTimeout = 60000;
+      Gemini.config.idleTimeout = 800;
+      Gemini.config.retryDelay = 0;
+      const realFetch = window.fetch;
+      window.fetch = (url, init) => {
+        const enc = new TextEncoder();
+        let sent = false;
+        const body = new ReadableStream({ pull(ctrl) {
+          if (sent) return new Promise(r => init.signal.addEventListener('abort', () => { ctrl.error(new DOMException('aborted', 'AbortError')); r(); }));
+          sent = true;
+          ctrl.enqueue(enc.encode('data: ' + JSON.stringify({candidates: [{content: {parts: [{text: 'hmm', thought: true}]}}]}) + '\\r\\n\\r\\n'));
+        }});
+        return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+      };
+      const seen = [];
+      const t0 = Date.now();
+      let msg = '';
+      try { await Gemini.generate('k', 'p', Gemini.REVIEW_SCHEMA, { onProgress: (c, i) => seen.push(!!(i && i.thinking)) }); }
+      catch (e) { msg = e.message; }
+      window.fetch = realFetch;
+      return { msg, seen, ms: Date.now() - t0 };
+    }""")
+    check("הפסיק לשלוח נתונים (1 שניות" in got["msg"] and got["ms"] < 5000 and True in got["seen"],
+          "stream started (thoughts) then stopped: idle timeout after %d ms, progress said 'thinking' (%s)" % (got["ms"], got["msg"]))
     ctx.close()
 
     # An error inside the stream (after HTTP 200) counts as a temporary server error: retried once
@@ -370,12 +437,41 @@ with sync_playwright() as p:
     ctx.close()
 
     # A lesson that fails the checks: message, prompt ready, and the answer can be opened in step 3
-    bad = dict(plain); bad["exercises"] = []
-    mock, ctx, page = failing("lesson fails the checks", [reply(json.dumps(bad, ensure_ascii=False))], "לא עבר את הבדיקות", 1)
-    check("אין תרגילים" in flow_msgs(page), "the failed checks are listed")
+    mock = MockApi(LESSON_JSON)
+    mock.queue["exercises"] = [reply('{"exercises": []}')]
+    ctx = new_context(browser, mock)
+    page = open_teacher(ctx, key=KEY)
+    fill_form(page)
+    page.click("#autoCreate")
+    wait_stage(page, "check", "fail")
+    check("לא עבר את הבדיקות" in flow_msgs(page) and "הפרומפט מוכן" in flow_msgs(page) and "אין תרגילים" in flow_msgs(page),
+          "lesson fails the checks: the failed checks are listed, copy-paste ready")
     page.click("#autoFlowMsgs button:has-text('לראות את התשובה')")
     check(page.is_visible("#step3") and "אין תרגילים" in page.text_content("#parseMsgs") and page.is_visible("#fixBox"),
           "the answer opens in step 3 with the usual fix message")
+    ctx.close()
+
+    # The exercises call fails: the story is kept; "try the exercises again" sends only that call
+    mock = MockApi(LESSON_JSON)
+    mock.queue["exercises"] = [api_error(500, "internal", None, "INTERNAL")] * 2
+    ctx = new_context(browser, mock)
+    page = open_teacher(ctx, key=KEY)
+    fill_form(page)
+    page.click("#autoCreate")
+    wait_stage(page, "exercises", "fail")
+    m = flow_msgs(page)
+    check(stage_of(page, "write")[1] == "done" and "הסיפור נשמר" in m and "תקלה זמנית" in m and mock.count("exercises") == 2
+          and stage_of(page, "check")[1] == "skip" and not page.is_disabled("#autoCreate"),
+          "exercises failed (after one retry): story stage done, 'הסיפור נשמר', the next stages skipped")
+    page.wait_for_timeout(800)
+    top = page.evaluate("document.getElementById('autoFlow').getBoundingClientRect().top")
+    check(-2 <= top < 300, "the message and its button are scrolled into view (panel top at %d px)" % top)
+    page.screenshot(path=os.path.join(OUT, "g5-exercises-failed.png"))
+    page.click("#autoFlowMsgs button:has-text('לנסות שוב את התרגילים')")
+    wait_stage(page, "review", "done")
+    check(mock.count("write") == 1 and mock.count("exercises") == 3 and stage_of(page, "exercises")[1] == "done"
+          and page.evaluate("JSON.parse(document.querySelector('#response').value).story") == plain["story"],
+          "retry of the exercises only: the story is not written again, the lesson is built from it")
     ctx.close()
 
     # One automatic retry after a temporary error
@@ -418,13 +514,14 @@ with sync_playwright() as p:
     wait_stage(page, "review", "done")
     fb = [x for x in mock.log if x["model"] == FALLBACK]
     check(mock.count("write", MODEL) == 4 and mock.count("write", FALLBACK) == 1, "503 four times on %s: switched to %s" % (MODEL, FALLBACK))
-    check(fb and fb[0]["body"]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "minimal"}
+    check(fb and fb[0]["body"]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "minimal", "includeThoughts": True}
           and fb[0]["body"]["generationConfig"]["responseSchema"]["type"] == "OBJECT", "fallback: same structured output, its own lowest thinking level (minimal)")
-    check(mock.count("review", FALLBACK) == 1 and mock.count("review", MODEL) == 0, "the review continues with the fallback model")
+    check(mock.count("exercises", FALLBACK) == 1 and mock.count("exercises", MODEL) == 0 and mock.count("review", FALLBACK) == 1
+          and mock.count("review", MODEL) == 0, "the exercises and the review continue with the fallback model")
     texts = page.evaluate("__stageTexts")
     check(any("ממשיכים עם מודל קל יותר (%s)" % FALLBACK in t for t in texts) and "במודל הגיבוי" in stage_of(page, "write")[2],
           "the teacher sees the switch, and that the story was written with the fallback")
-    check(any("still overloaded (503)" in c and FALLBACK in c for c in console) and any(("write-lesson (%s): HTTP 200" % FALLBACK) in c for c in console),
+    check(any("still overloaded (503)" in c and FALLBACK in c for c in console) and any(("write-story (%s): HTTP 200" % FALLBACK) in c for c in console),
           "console: the switch and the fallback's calls, with its name")
     # The next lesson starts with the main model again
     before = len(mock.log)

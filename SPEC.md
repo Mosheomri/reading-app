@@ -126,38 +126,50 @@ check that the text fits the lesson's level, and to report mismatches as `style`
 - **API**: `POST https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:streamGenerateContent?alt=sse`
   from the browser (streamed, server-sent events), key in the `x-goog-api-key` header (never in the URL).
   The text of every chunk is joined (parts marked `thought` are left out); an `error` event inside the stream
-  counts like an HTTP error. While it streams, the stage shows "כותב סיפור… (נכתבו כבר X תווים)".
+  counts like an HTTP error. While it streams, the stage shows "כותב סיפור… (נכתבו כבר X תווים)"; before the
+  first answer text, while only thought summaries come, "כותב סיפור: חושב…".
 - **Thinking**: `generationConfig.thinkingConfig.thinkingLevel = 'low'`, the lowest level of
   `gemini-3.8-flash` (it has low / medium / high, default medium; ai.google.dev/gemini-api/docs/thinking),
-  for shorter answers. A constant (`THINKING_LEVEL`) next to `MODEL`. If the API rejects the setting (400
-  mentioning thinking), the request is sent once more without it.
-- **Timeouts**: a streamed answer times out only after **45 s with no data at all** (`config.idleTimeout`; the
+  for shorter answers. A constant (`THINKING_LEVEL`) next to `MODEL`. `includeThoughts: true` too: thought
+  summaries stream while the model thinks, so the timer is reset and the teacher sees "חושב…" (they are not
+  part of the answer). If the API rejects the setting (400 mentioning thinking), the request is sent once more
+  without it.
+- **Timeouts**: a streamed answer may take **120 s to its first data** (`config.firstDataTimeout`: the model
+  may think first); after that it times out only after **45 s with no new data** (`config.idleTimeout`; the
   timer starts again on every chunk, so a long answer that keeps coming is never cut). Plain requests
   (checking the key): 120 s (`config.timeout`).
-- **Console**: one line per request, `[Gemini] <call> (<model>): HTTP <status>, <seconds> s, <chars> chars,
-  finish <reason>[, retry][ – <error and Google's message>]` (`console.info`, `console.warn` on errors).
-  Calls: `check-key`, `write-lesson`, `review-text`. The key is never logged.
+- **Console**: one line per request, `[Gemini] <call> (<model>): HTTP <status>, <seconds> s (first data after
+  <seconds> s), <chars> chars, finish <reason>[, retry][ – <error and Google's message>]` (`console.info`,
+  `console.warn` on errors). Calls: `check-key`, `write-story`, `write-exercises`, `review-text` (`write-lesson`:
+  the whole lesson in one call, `Gemini.writeLesson`, not used by the flow). The key is never logged.
 - **Model and output**: `MODEL` is one constant at the top of `js/gemini.js`: `gemini-3.8-flash` (stable, has a free tier; checked in the official pricing and models pages,
   October 2026). Structured output: `generationConfig.responseMimeType = 'application/json'` and a
-  `responseSchema` (OpenAPI subset): the lesson schema mirrors the prompt's example (section 5), with `answer` as
-  a string for all exercise types ("0", "true"), which `Lesson.coerce` already accepts; the review schema is the
-  list the review prompt asks for.
+  `responseSchema` (OpenAPI subset): `STORY_SCHEMA` (title, topic, targetWords, story) and `EXERCISES_SCHEMA`
+  (`{exercises}`) are the two halves of the lesson schema, which mirrors the prompt's example (section 5), with
+  `answer` as a string for all exercise types ("0", "true"), which `Lesson.coerce` already accepts; the review
+  schema is the list the review prompt asks for.
 - **Flow** after "✨ צור שיעור" (shown next to "יצירת פרומפט" once a key is saved), with a stage list on top of
   the page (⏳ active, ✓ done, ✕ failed, 👆 the teacher's turn, – skipped):
-  1. **כותב סיפור…**: the same prompt as copy-paste (`buildPrompt`). The JSON goes into the step 3 box.
-  2. **בודק את השיעור…**: the same checks as a paste (`analyzeResponse`: extract, coerce, sort order exercises,
+  1. **כותב סיפור…**: the story part of the copy-paste prompt (`buildStoryPrompt`: the same lines as
+     `buildPrompt` up to the exercises), with the small story schema. Two calls instead of one: each answer is
+     smaller, so it comes faster, and a failed exercises call does not lose the story.
+  2. **כותב תרגילים…**: `buildExercisesPrompt(settings, story)`: the story Gemini wrote, its title and target
+     words, the same exercise lines as the copy-paste prompt and the text rules. Story and exercises are joined
+     into one lesson JSON, which goes into the step 3 box. If this call fails, the story is kept: "↻ לנסות שוב
+     את התרגילים" sends only this call again ("שיעור חדש" starts over).
+  3. **בודק את השיעור…**: the same checks as a paste (`analyzeResponse`: extract, coerce, sort order exercises,
      `Lesson.check`). Errors stop the flow; warnings only go on (they show in the preview).
-  3. **בודק טקסט…**: a separate call with the existing review prompt (`Review.buildReviewPrompt`). The check
+  4. **בודק טקסט…**: a separate call with the existing review prompt (`Review.buildReviewPrompt`). The check
      step opens and the suggestions are shown for approval exactly as after a paste.
-  4. **מחכה לאישור ההצעות**: when the last suggestion is approved or rejected, the flow goes on. That last
+  5. **מחכה לאישור ההצעות**: when the last suggestion is approved or rejected, the flow goes on. That last
      decision is a click, so Dicta may open in a new window then (popups need a user gesture).
-  5. **מנקד בדיקטה…**: if the Dicta bridge answered before in this browser (`readingApp.dictaBridge`, set on its
+  6. **מנקד בדיקטה…**: if the Dicta bridge answered before in this browser (`readingApp.dictaBridge`, set on its
      "ready", cleared when it does not answer), automatic nikud starts. Otherwise (or with no suggestions, when
      there is no click to open a window from) it is the teacher's turn: the auto-nikud button is highlighted and
      the manual steps are there. No nikud mode: skipped.
-  6. "השיעור מוכן ✓" with a button to the link.
+  7. "השיעור מוכן ✓" with a button to the link.
 - **Errors** (clear Hebrew message, the copy-paste flow with the prompt ready in step 2, and "↻ לנסות שוב"):
-  invalid key (400 `API_KEY_INVALID`, 401, 403), quota (429), no network, no data for 45 s, blocked
+  invalid key (400 `API_KEY_INVALID`, 401, 403), quota (429), no network, no data for 120 s / 45 s, blocked
   (`promptFeedback.blockReason`, safety finish), cut (`MAX_TOKENS`), empty answer, a lesson that fails the checks
   (its problems listed, and "לראות את התשובה ולתקן" opens it in step 3 with the usual fix message).
   **Retries**: server overloaded (**503** / `UNAVAILABLE`, also as an error event inside the stream): up to **3
@@ -168,7 +180,7 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   `FALLBACK_MODEL` (a constant at the top of `js/gemini.js`: `gemini-3.5-flash-lite`, stable, free tier,
   structured outputs and thinking; its lowest thinking level `minimal`, `FALLBACK_THINKING_LEVEL`), with the
   same retries. The stage shows "ממשיכים עם מודל קל יותר (…)" and the story is marked as written with the
-  fallback. The rest of that run (the review) stays on the fallback; the next "צור שיעור" starts with the main
+  fallback. The rest of that run (the exercises, the review) stays on the fallback; the next "צור שיעור" starts with the main
   model again (`Gemini.resetModel()`). Both models overloaded: "השרת של Google עמוס כרגע…" and copy-paste.
   **A review error** does not stop the flow: a clear message with **"↻ נסה ביקורת שוב"** at the top and in the
   review part (the manual review is offered too). Nikud is offered meanwhile, without scrolling away from the
@@ -176,7 +188,9 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   "ready for a link" is shown together with the failure and its button.
 - Leaving the flow (new lesson, loading a file, pasting a response, "יצירת פרומפט") cancels it; late answers
   from a cancelled run are ignored.
-- **Tests**: `tests/gemini.py`, against a mock API (Playwright routing).
+- **Tests**: `tests/gemini.py`, against a mock API (Playwright routing). **Real timing**: `tests/gemini_bench.py`
+  (not in `run_all.py`; the key from the `GEMINI_API_KEY` environment variable only) writes lessons the way the
+  flow does with both models and reports the time to the first data, the total time and the failures.
 
 ### Step 2: Prompt
 - Generate the prompt (section 6) from the form values.

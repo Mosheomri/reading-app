@@ -1013,6 +1013,7 @@
   // Stage states: '' (not yet), active, done, fail, skip, wait (the teacher's turn).
   var STAGES = [
     { id: 'write', active: 'כותב סיפור…', done: 'הסיפור נכתב' },
+    { id: 'exercises', active: 'כותב תרגילים…', done: 'התרגילים נכתבו' },
     { id: 'check', active: 'בודק את השיעור…', done: 'השיעור עבר את הבדיקות' },
     { id: 'review', active: 'בודק טקסט…', done: 'בדיקת הטקסט הסתיימה' },
     { id: 'approve', active: 'מחכה לאישור ההצעות שלכם', done: 'ההצעות טופלו' },
@@ -1020,7 +1021,7 @@
   ];
   var ICONS = { '': '○', active: '⏳', done: '✓', fail: '✕', skip: '–', wait: '👆' };
 
-  var auto = null; // {id, stages: {id: {state, note}}, waitingApproval}
+  var auto = null; // {stages: {id: {state, note}}, waitingApproval, fallback, reviewError, story (kept to retry the exercises)}
   var autoRuns = 0;
 
   function renderStages() {
@@ -1064,7 +1065,7 @@
     if (!key) { syncGemini(); return; }
     var run = ++autoRuns;
     G.resetModel(); // every new lesson starts with the main model
-    auto = { stages: {}, waitingApproval: false, fallback: false, reviewError: null };
+    auto = { stages: {}, waitingApproval: false, fallback: false, reviewError: null, story: null };
     STAGES.forEach(function (st) { auto.stages[st.id] = { state: '', note: '' }; });
     if (state.settings.nikud === 'none') auto.stages.nikud = { state: 'skip', note: 'בלי ניקוד' };
     $('autoFlow').hidden = false;
@@ -1073,40 +1074,105 @@
     stage('write', 'active');
     var current = function () { return auto && run === autoRuns; };
 
-    G.writeLesson(key, $('promptText').textContent, streamOpts('write', 'כותב סיפור…', current)).then(function (text) {
+    // Two calls: the story first, then the exercises on it (a smaller answer each, so each comes faster).
+    G.writeStory(key, window.buildStoryPrompt(state.request), streamOpts('write', 'כותב סיפור…', current)).then(function (text) {
       if (!current()) return;
-      stage('write', 'done', auto.fallback ? 'הסיפור נכתב (במודל הגיבוי ' + G.currentModel() + ')' : '');
-      stage('check', 'active');
-      $('response').value = text; // the answer is there for step 3, as if pasted
-      var a = analyzeResponse(text);
-      if (a.error || a.errors.length) {
-        $('autoCreate').disabled = false;
-        stage('check', 'fail', 'השיעור שהתקבל לא עבר את הבדיקות');
-        markRest('check');
-        showStep(2);
-        flowMsg(el('div', null,
-          msgBox('error', 'השיעור ש-Gemini כתב לא עבר את הבדיקות:', a.error ? [a.error].concat(a.items || []) : a.errors),
-          msgBox('info', 'אפשר לנסות שוב, לתקן בעצמכם, או להמשיך בהעתק-הדבק: הפרומפט מוכן כאן למטה, לכל צ׳אט.'),
-          el('div', { class: 'row' },
-            actionBtn('↻ לנסות שוב', autoCreate, true),
-            actionBtn('לראות את התשובה ולתקן', function () { showStep(3); parseResponse(); }))));
+      var story = readJson(text);
+      if (!story || typeof story.story !== 'string' || !story.story.trim()) {
+        writeFailed({ message: 'Gemini החזיר סיפור לא שלם.' });
         return;
       }
-      acceptLesson(a.lesson, state.request);
-      stage('check', 'done', a.warnings.length ? 'השיעור עבר את הבדיקות (יש הערות בתצוגה)' : '');
-      autoReview(key, run);
+      auto.story = story;
+      stage('write', 'done', auto.fallback ? 'הסיפור נכתב (במודל הגיבוי ' + G.currentModel() + ')' : '');
+      autoExercises(key, run);
     }, function (e) {
+      if (current()) writeFailed(e);
+    });
+  }
+
+  function readJson(text) {
+    try { return JSON.parse(text); } catch (e) { return null; }
+  }
+
+  // The story was not written: nothing to keep; try again or copy-paste.
+  function writeFailed(e) {
+    $('autoCreate').disabled = false;
+    stage('write', 'fail', 'הכתיבה לא הצליחה');
+    markRest('write');
+    showStep(2);
+    flowMsg(el('div', null,
+      msgBox('error', (e && e.message) || 'Gemini לא הצליח לכתוב את השיעור.',
+        e && e.kind === 'key' ? [el('span', null, 'בדקו את המפתח בשלב 1, או ראו ', el('a', { href: 'gemini-setup.html', target: '_blank', rel: 'noopener' }, 'איך מקבלים מפתח'), '.')] : null),
+      msgBox('info', 'אפשר להמשיך בהעתק-הדבק: הפרומפט מוכן כאן למטה. העתיקו אותו לכל צ׳אט (Gemini, ChatGPT ואחרים).'),
+      el('div', { class: 'row' }, actionBtn('↻ לנסות שוב', autoCreate, true))));
+  }
+
+  // The second call: exercises on auto.story. If it fails, the story is kept and only this call can be tried again.
+  function autoExercises(key, run) {
+    var current = function () { return auto && run === autoRuns; };
+    var story = auto.story;
+    $('autoCreate').disabled = true;
+    flowMsg(null);
+    stage('exercises', 'active');
+    G.writeExercises(key, window.buildExercisesPrompt(state.request, story), streamOpts('exercises', 'כותב תרגילים…', current)).then(function (text) {
       if (!current()) return;
+      var ex = readJson(text);
+      if (!ex || !Array.isArray(ex.exercises)) {
+        exercisesFailed(key, run, { message: 'Gemini החזיר תרגילים לא שלמים.' });
+        return;
+      }
+      stage('exercises', 'done', auto.fallback ? 'התרגילים נכתבו (במודל הגיבוי ' + G.currentModel() + ')' : '');
+      var lesson = { version: 1, title: story.title, topic: story.topic, targetWords: story.targetWords, story: story.story, exercises: ex.exercises };
+      autoCheck(key, run, JSON.stringify(lesson, null, 2));
+    }, function (e) {
+      if (current()) exercisesFailed(key, run, e);
+    });
+  }
+
+  function exercisesFailed(key, run, e) {
+    $('autoCreate').disabled = false;
+    stage('exercises', 'fail', 'כתיבת התרגילים לא הצליחה');
+    markRest('exercises');
+    flowMsg(el('div', null,
+      msgBox('error', (e && e.message) || 'Gemini לא הצליח לכתוב את התרגילים.'),
+      msgBox('info', 'הסיפור נשמר. אפשר לנסות שוב רק את התרגילים, או להתחיל שיעור חדש.'),
+      el('div', { class: 'row' },
+        actionBtn('↻ לנסות שוב את התרגילים', function () { retryExercises(key, run); }, true),
+        actionBtn('שיעור חדש', autoCreate))));
+    $('autoFlow').scrollIntoView({ block: 'start', behavior: 'smooth' }); // the message and its button are up there
+  }
+
+  function retryExercises(key, run) {
+    if (!auto || run !== autoRuns || !auto.story) return;
+    var after = false;
+    STAGES.forEach(function (st) {
+      if (st.id === 'exercises') after = true;
+      if (after && !(st.id === 'nikud' && state.settings.nikud === 'none')) auto.stages[st.id] = { state: '', note: '' };
+    });
+    autoExercises(key, run);
+  }
+
+  // The whole lesson (story + exercises) goes through the same checks as a pasted answer.
+  function autoCheck(key, run, text) {
+    stage('check', 'active');
+    $('response').value = text; // the answer is there for step 3, as if pasted
+    var a = analyzeResponse(text);
+    if (a.error || a.errors.length) {
       $('autoCreate').disabled = false;
-      stage('write', 'fail', 'הכתיבה לא הצליחה');
-      markRest('write');
+      stage('check', 'fail', 'השיעור שהתקבל לא עבר את הבדיקות');
+      markRest('check');
       showStep(2);
       flowMsg(el('div', null,
-        msgBox('error', (e && e.message) || 'Gemini לא הצליח לכתוב את השיעור.',
-          e && e.kind === 'key' ? [el('span', null, 'בדקו את המפתח בשלב 1, או ראו ', el('a', { href: 'gemini-setup.html', target: '_blank', rel: 'noopener' }, 'איך מקבלים מפתח'), '.')] : null),
-        msgBox('info', 'אפשר להמשיך בהעתק-הדבק: הפרומפט מוכן כאן למטה. העתיקו אותו לכל צ׳אט (Gemini, ChatGPT ואחרים).'),
-        el('div', { class: 'row' }, actionBtn('↻ לנסות שוב', autoCreate, true))));
-    });
+        msgBox('error', 'השיעור ש-Gemini כתב לא עבר את הבדיקות:', a.error ? [a.error].concat(a.items || []) : a.errors),
+        msgBox('info', 'אפשר לנסות שוב, לתקן בעצמכם, או להמשיך בהעתק-הדבק: הפרומפט מוכן כאן למטה, לכל צ׳אט.'),
+        el('div', { class: 'row' },
+          actionBtn('↻ לנסות שוב', autoCreate, true),
+          actionBtn('לראות את התשובה ולתקן', function () { showStep(3); parseResponse(); }))));
+      return;
+    }
+    acceptLesson(a.lesson, state.request);
+    stage('check', 'done', a.warnings.length ? 'השיעור עבר את הבדיקות (יש הערות בתצוגה)' : '');
+    autoReview(key, run);
   }
 
   // Progress while Gemini streams its answer, and the retry / fallback notes.
@@ -1126,9 +1192,12 @@
         auto.fallback = true;
         stage(id, 'active', 'השרת של גוגל עמוס; ממשיכים עם מודל קל יותר (' + model + ')…');
       },
-      onProgress: function (chars) {
-        if (!current() || (!chars && retrying)) return;
-        stage(id, 'active', label + (chars ? ' (נכתבו כבר ' + chars.toLocaleString('he-IL') + ' תווים)' : ''));
+      // Thought summaries come before the answer: "חושב…" until its first characters.
+      onProgress: function (chars, info) {
+        var thinking = !chars && info && info.thinking;
+        if (!current() || (!chars && !thinking && retrying)) return;
+        stage(id, 'active', thinking ? label.replace(/…$/, '') + ': חושב…'
+          : label + (chars ? ' (נכתבו כבר ' + chars.toLocaleString('he-IL') + ' תווים)' : ''));
       }
     };
   }
