@@ -174,13 +174,13 @@ with sync_playwright() as p:
     story = page.locator("#editor textarea")
     story.fill(page.evaluate("(s) => Hebrew.stripNikud(s)", story.input_value()))
     page.wait_for_timeout(400)
-    page.click("#makeLink")
+    # Text changed after the nikud: going on to the check step sends the changed lines to Dicta (in that click)
     with page.expect_popup() as pop:
-        page.click("#autoNikud")
+        page.click("#makeLink")
     popup = pop.value
     page.wait_for_function("() => document.querySelector('#autoNikudMsgs').textContent.includes('דיקטה מנקדת')", timeout=5000)
     check(page.is_disabled("#autoNikud"), "while working: status shown, button disabled")
-    page.wait_for_function("() => document.querySelector('#nikudMsgs').textContent.includes('הוחל על')", timeout=15000)
+    page.wait_for_function("() => document.querySelector('#nikudMsgs').textContent.includes('דיקטה ניקדה')", timeout=15000)
     st = draft(page)["lesson"]["story"]
     unvoc = page.evaluate("(s) => Hebrew.tokenize(s).filter(t => t.isWord && !Hebrew.hasNikud(t.text)).length", st)
     check(unvoc == 0, "slow Dicta: the half-done update was not taken (%d words without nikud)" % unvoc)

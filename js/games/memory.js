@@ -16,7 +16,8 @@
       var pairs = U.shuffle(ctx.targets).slice(0, MAX_PAIRS);
       var cards = [];
       pairs.forEach(function (t, id) {
-        cards.push({ id: id, kind: 'emoji', label: t.emoji, word: t.word });
+        // An emoji this device cannot show: its card shows the word instead.
+        cards.push({ id: id, kind: 'emoji', label: U.emojiShown(t.emoji) ? t.emoji : ctx.show(t.word), word: t.word });
         cards.push({ id: id, kind: 'word', label: ctx.show(t.word), word: t.word });
       });
       cards = U.shuffle(cards);

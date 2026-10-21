@@ -237,6 +237,22 @@ check that the text fits the lesson's level, and to report mismatches as `style`
    - The nikud step is tied to the text it was applied to. Any text change afterwards requires Dicta again
      before a link (the progress bar cannot skip it either). The state is kept in the saved draft; a loaded
      lesson file in which every word has nikud counts as vocalized.
+   - **After the first Dicta run** (`state.nikudOnce`, kept in the draft), only the lines that need it go to
+     Dicta again (`Review.linesToNikud`): lines that changed since Dicta's nikud was last valid (compared with
+     `state.nikudLines`, the vocalized lines then, kept in the draft; choosing a version of a word updates it),
+     and lines with Hebrew words that have no nikud (text that came in later, such as an approved suggestion,
+     whose fix has no nikud; words Dicta left without nikud). In those lines words without nikud take Dicta's
+     word (`Review.lineFills`, same letters required), and vocalized words that differ are listed for a choice,
+     as in the full comparison. An edit undone leaves nothing to send. The button with nothing to send, and a
+     pasted whole text, run the full comparison as before.
+   - With the bridge known, this happens by itself inside the next click (`window.open` needs one;
+     `navigator.userActivation`): after the last decision on the suggestions, on going to the check step, on
+     "יצירת קישור". Without the bridge: "נוסף טקסט בלי ניקוד אחרי הניקוד (N שורות)…" with what to do; "העתק
+     טקסט בלי ניקוד" copies only those lines and the paste box takes only them. Messages that fit the stage:
+     the suggestion's note ("השורה שלו תנוקד שוב בדיקטה"), the preview ("שנוספו אחרי הניקוד… ינוקדו במעבר לשלב
+     הבדיקה"), and after Dicta "דיקטה ניקדה את השורות שהשתנו (N מילים)".
+   - Words still without nikud after Dicta (full mode) are listed ("דיקטה לא ניקדה N מילים"); the button then
+     sends only their lines.
 
 #### 3.2 Second opinion on the nikud (Gemini; automatic mode only)
 Only when a Gemini key is saved; with copy-paste (no key) nothing changes. It never blocks the lesson.
@@ -254,8 +270,16 @@ Only when a Gemini key is saved; with copy-paste (no key) nothing changes. It ne
 - **Comparison** (`Review.compareSecond`), word by word with the lesson's words as they are when the answer
   comes (Dicta's nikud, or the teacher's choice): not compared when the letters differ at Gemini's (or the word
   changed here meanwhile), when Gemini's word has no nikud, or when the child sees the word without nikud
-  (partial mode: only target words count). Normalization (`Review.sameReading`): per letter, the set of marks,
-  ignoring cantillation, meteg and rafe, holam haser for vav = holam, qamats qatan = qamats.
+  (partial mode: only target words count). Only a difference in the **reading** is marked
+  (`Review.sameReading`, by `Review.pronunciation`: one consonant and one vowel sound per letter): dagesh counts
+  only in ב כ פ (b/v, k/kh, p/f) and in ו (shuruk); shin / sin dot (a ש without a dot fits both); vowels by
+  their sound in modern Hebrew: patah = qamats = hataf patah, tsere = segol = hataf segol, holam on the letter
+  or on the ו, qubuts/shuruk = u, qamats qatan = qamats (the same sign on the page); sheva fits no vowel or e;
+  a ו / י that only carries the vowel before it is silent; cantillation, meteg and rafe are ignored.
+- **Report**: every difference (also those not marked) with its kinds (`Review.diffKinds`: דגש בבכ״פ, דגש באות
+  אחרת, שווא / חטף, שווא / בלי סימן, שווא / תנועה, קמץ קטן, פתח / קמץ, צירה / סגול, חולם / שורוק, שי״ן / שׂי״ן,
+  תנועה חסרה, תנועה אחרת, מתג / טעמים). A console summary per run (`console.table`), and the link "פירוט כל
+  ההבדלים (קובץ)" downloads it as JSON; `tests/nikud_diff_report.py` sums up several files by kind.
 - **Display**: words that read differently get an orange underline (`.nikud-check`) everywhere in the preview
   (title, target words, story, exercises, also fill sentences). Above the story: "X מילים לבדיקה" with
   "הבאה ←" (scrolls to the next marked word and opens it) and "סמן הכול כבדוק". Clicking a marked word (or
@@ -267,9 +291,11 @@ Only when a Gemini key is saved; with copy-paste (no key) nothing changes. It ne
   all checked: "כל המילים נבדקו ✓".
 - **Failure**: a small message "הבדיקה הכפולה לא רצה" with "↻ נסה שוב" (and the reason); the lesson goes on.
 - **Edits**: a mark stays only while its word is unchanged (`Review.liveMarks`, by field and word index); an
-  edited word loses its mark for good. Dicta again starts a new second opinion; a new lesson drops it. The
-  marks are kept in the saved draft (`second`).
-- **Tests**: `tests/nikud_second.py`, against a mock API.
+  edited word loses its mark for good. Dicta again starts a new second opinion (after a run on some lines
+  only, only those lines, and the marks elsewhere stay); a new lesson drops it. The marks are kept in the saved
+  draft (`second`).
+- **Tests**: `tests/nikud_second.py`, against a mock API; `tests/renikud.py` (only the changed lines, with
+  the Dicta bridge mock); `tests/emoji.py`.
 
 #### 3.1 Automatic nikud: the Dicta bridge
 A Tampermonkey userscript, `userscripts/dicta-bridge.user.js`, runs on `https://nakdan.dicta.org.il/*` and
@@ -292,7 +318,8 @@ talks with the teacher page (`js/dicta.js`) through `window.postMessage`.
      clicks `SEL.nikudButton` if one is set (none today: Dicta vocalizes on input).
   5. It waits for the result with a `MutationObserver` (plus a 250 ms poll as a backup). The result is
      accepted when its letters match the text sent (ignoring nikud and ו/י), at least 90% of the Hebrew words
-     have nikud (an update on the way is not taken), and it has not changed for 800 ms. 30 s per part at most.
+     have nikud (an update on the way is not taken), and it has not changed for 800 ms (4 s when some Hebrew
+     words still have no nikud: Dicta may not be done; script 1.1.0). 30 s per part at most.
   6. Text longer than 5000 characters is split into parts at line ends (a longer line at a space), vocalized
      one part at a time (`{type: 'progress', part, parts}`), and joined back the same way.
   7. `{type: 'result', id, text}`, then the script closes the window. The page puts the text into the paste
@@ -381,7 +408,10 @@ Fixed order: **Games → Reading → Exercises → Finish**. Progress bar on top
 - Going back to a game starts it again. Coming back to the reading screen starts it fresh (mode "רגיל").
 
 ### 4.1 Games (learn the target words)
-All games use only the lesson's target words (+ their emojis).
+All games use only the lesson's target words (+ their emojis). An emoji this device cannot show
+(`Util.emojiShown`: measured on a canvas; a missing emoji is drawn like a character no font has, an unknown
+sequence or flag falls apart into wider parts) is replaced by its word: in the teacher preview and print (the
+word alone), on the start page and on its memory card; the build game leaves it out (the word is the answer).
 1. **זוגות (Memory)** – cards: word ↔ emoji. Flip two, match pairs.
 2. **הרכבת מילה** – letters of a target word shuffled (with nikud attached to each letter as written); child taps letters in order.
 3. **שומעים ובוחרים** – the word is read aloud (Web Speech API, `he-IL`); child picks it from 3–4 target words.
@@ -559,7 +589,7 @@ Written in Hebrew. Placeholders in `{}`.
 - {level language lines, one per line}
 - כתוב את כל הטקסט בלי ניקוד בכלל: הכותרת, הסיפור, המילים, השאלות והתשובות.
 - כתוב בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר).
-- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה.
+- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה. רק אימוג׳י נפוץ וותיק שמוצג בכל מכשיר (כמו 🐶 🌳 ⚽ 🏠 🍎): בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.
 - אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד.
 
 תרגילים:

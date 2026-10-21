@@ -392,7 +392,8 @@
 
   /* ---------- 3. Second opinion on the nikud (Gemini, automatic mode only) ---------- */
 
-  // The lines sent to Dicta (plainText), each with its words' places in the lesson: [{text, refs: [{key, index}]}].
+  // The lines sent to Dicta (plainText), each with its words' places in the lesson:
+  // [{text (without nikud), vocal (as it is now), refs: [{key, index}]}].
   // A slot's lines are split at its newlines (the story keeps its paragraphs), empty lines left out, as in plainText.
   function nikudLines(lesson) {
     var out = [];
@@ -402,7 +403,7 @@
         var ws = words(line);
         var plain = H.stripNikud(line).trim();
         if (plain && ws.length) {
-          out.push({ text: plain, refs: ws.map(function (w, j) { return { key: slot.key, index: k + j }; }) });
+          out.push({ text: plain, vocal: H.normalize(line).trim(), refs: ws.map(function (w, j) { return { key: slot.key, index: k + j }; }) });
         }
         k += ws.length;
       });
@@ -437,33 +438,123 @@
     ].join('\n');
   }
 
-  // Marks that do not change how a young reader reads the word: cantillation, meteg, rafe;
-  // holam haser for vav = holam; qamats qatan = qamats (the same sign on the page).
-  var READING_IGNORE_RE = /[֑-ֽֿ֯]/g;
+  // How a reader says the word: one {c, v} per letter. c: the consonant ('' when the letter is silent: a ו or
+  // a י that only carries the vowel of the letter before); v: the vowel sound. Only what changes the reading
+  // counts: dagesh only in ב כ פ (b/v, k/kh, p/f) and in ו (shuruk); shin / sin dot; vowels by their sound in
+  // modern Hebrew (patah = qamats = hataf patah, tsere = segol = hataf segol, holam on the letter or on the ו,
+  // qamats qatan = qamats: the same sign on the page). Sheva is 'ə': read as nothing or as e.
+  var VOWEL_SOUND = { '\u05B0': 'ə', '\u05B1': 'e', '\u05B2': 'a', '\u05B3': 'o', '\u05B4': 'i', '\u05B5': 'e', '\u05B6': 'e',
+    '\u05B7': 'a', '\u05B8': 'a', '\u05C7': 'a', '\u05B9': 'o', '\u05BA': 'o', '\u05BB': 'u' };
+  var FINAL_FORM = { 'ך': 'כ', 'ם': 'מ', 'ן': 'נ', 'ף': 'פ', 'ץ': 'צ' };
+  var DAGESH = '\u05BC';
 
-  // A comparable key for the nikud of a word: per letter, its marks in a fixed order.
-  function readingKey(word) {
-    return H.graphemes(word).filter(function (c) { return /[\p{L}\p{N}]/u.test(c.charAt(0)); }).map(function (c) {
-      return c.slice(1).replace(/[^\p{M}]/gu, '').replace(READING_IGNORE_RE, '')
-        .replace(/ֺ/g, 'ֹ').replace(/ׇ/g, 'ָ').split('').sort().join('');
-    }).join('|');
+  function clustersOf(word) {
+    return H.graphemes(word).filter(function (c) { return /[\p{L}\p{N}]/u.test(c.charAt(0)); });
   }
 
-  // Do two vocalizations of the same letters read the same?
+  function vowelOf(marks) {
+    var v = '';
+    for (var i = 0; i < marks.length; i++) if (VOWEL_SOUND[marks[i]]) v = VOWEL_SOUND[marks[i]];
+    return v;
+  }
+
+  function pronunciation(word) {
+    var out = [];
+    clustersOf(word).forEach(function (cl) {
+      var letter = FINAL_FORM[cl.charAt(0)] || cl.charAt(0);
+      var marks = cl.slice(1).replace(/[^\p{M}]/gu, '').replace(/[\u0591-\u05AF\u05BD\u05BF]/g, ''); // no meteg, cantillation, rafe
+      var dagesh = marks.indexOf(DAGESH) !== -1;
+      var v = vowelOf(marks);
+      var prev = out[out.length - 1];
+      if (letter === 'ו') {
+        // holam male (וֹ) or shuruk (וּ): the vowel of the letter before; a bare ו after o / u carries it too
+        var u = dagesh && !v;
+        if ((v === 'o' && marks.replace(/[\u05B9\u05BA]/g, '') === '') || u) {
+          if (prev && !prev.v) { prev.v = u ? 'u' : 'o'; out.push({ c: '', v: '' }); } else out.push({ c: '', v: u ? 'u' : 'o' });
+          return;
+        }
+        if (!marks && prev && (prev.v === 'o' || prev.v === 'u')) { out.push({ c: '', v: '' }); return; }
+        out.push({ c: 'ו', v: v });
+        return;
+      }
+      if (letter === 'י' && !marks && prev && (prev.v === 'i' || prev.v === 'e')) { out.push({ c: '', v: '' }); return; }
+      var c = letter;
+      if ('בכפ'.indexOf(letter) !== -1) c = letter + (dagesh ? '!' : '');
+      else if (letter === 'ש') c = marks.indexOf('\u05C1') !== -1 ? 'ש' : marks.indexOf('\u05C2') !== -1 ? 'ס' : 'ש?';
+      out.push({ c: c, v: v });
+    });
+    return out;
+  }
+
+  function sameVowel(a, b) {
+    if (a === b) return true;
+    return (a === 'ə' && (b === '' || b === 'e')) || (b === 'ə' && (a === '' || a === 'e'));
+  }
+
+  // Do two vocalizations of the same letters read the same? (A ש without a dot fits shin and sin.)
   function sameReading(a, b) {
-    return readingKey(a) === readingKey(b);
+    var pa = pronunciation(a);
+    var pb = pronunciation(b);
+    if (pa.length !== pb.length) return false;
+    for (var i = 0; i < pa.length; i++) {
+      var ca = pa[i].c, cb = pb[i].c;
+      if (ca !== cb && !(ca === 'ש?' && (cb === 'ש' || cb === 'ס')) && !(cb === 'ש?' && (ca === 'ש' || ca === 'ס'))) return false;
+      if (!sameVowel(pa[i].v, pb[i].v)) return false;
+    }
+    return true;
+  }
+
+  /* Kinds of difference between two vocalizations of the same letters (for the report on the second opinion). */
+  var SHEVA = '\u05B0';
+  var HATAF = /[\u05B1-\u05B3]/;
+  var A_CLASS = /[\u05B2\u05B7\u05B8\u05C7]/;
+  var E_CLASS = /[\u05B1\u05B5\u05B6]/;
+  var O_SIGNS = /[\u05B9\u05BA]/;
+  var VOWEL_RE = /[\u05B0-\u05BB\u05C7]/g;
+  var TEAMIM_RE = /[\u0591-\u05AF\u05BD\u05BF]/g;
+
+  function diffKinds(a, b) {
+    var ca = clustersOf(a), cb = clustersOf(b);
+    var kinds = {};
+    if (ca.length !== cb.length) return ['אותיות שונות'];
+    for (var i = 0; i < ca.length; i++) {
+      var letter = ca[i].charAt(0);
+      var ma = ca[i].slice(1), mb = cb[i].slice(1);
+      if ((ma.match(TEAMIM_RE) || []).sort().join('') !== (mb.match(TEAMIM_RE) || []).sort().join('')) kinds['מתג / טעמים'] = 1;
+      var da = ma.indexOf(DAGESH) !== -1, db = mb.indexOf(DAGESH) !== -1;
+      if (da !== db) {
+        kinds[letter === 'ו' ? 'חולם / שורוק' : 'בכפךף'.indexOf(letter) !== -1 ? 'דגש בבכ״פ' : 'דגש (באות אחרת)'] = 1;
+      }
+      if (letter === 'ש' && (ma.indexOf('\u05C1') !== -1) !== (mb.indexOf('\u05C1') !== -1)) kinds['שי״ן / שׂי״ן'] = 1;
+      var va = (ma.match(VOWEL_RE) || []).join(''), vb = (mb.match(VOWEL_RE) || []).join('');
+      if (va === vb) continue;
+      var both = va + vb;
+      if (O_SIGNS.test(both) || letter === 'ו' || (cb[i + 1] && cb[i + 1].charAt(0) === 'ו')) kinds['חולם / שורוק'] = 1;
+      else if ((va === SHEVA && HATAF.test(vb)) || (vb === SHEVA && HATAF.test(va))) kinds['שווא / חטף'] = 1;
+      else if ((va === SHEVA && !vb) || (vb === SHEVA && !va)) kinds['שווא / בלי סימן'] = 1;
+      else if (/\u05C7/.test(both)) kinds['קמץ קטן'] = 1;
+      else if (A_CLASS.test(va) && A_CLASS.test(vb)) kinds['פתח / קמץ'] = 1;
+      else if (E_CLASS.test(va) && E_CLASS.test(vb)) kinds['צירה / סגול'] = 1;
+      else if (!va || !vb) kinds['תנועה חסרה'] = 1;
+      else if (va === SHEVA || vb === SHEVA) kinds['שווא / תנועה'] = 1;
+      else kinds['תנועה אחרת'] = 1;
+    }
+    return Object.keys(kinds);
   }
 
   // Compares the lesson's words (Dicta's nikud, as they are now) with Gemini's vocalized lines.
   // sent: the lines sent (nikudLines); got: Gemini's lines, in the same order.
   // Words whose letters differ at Gemini's (or that changed here meanwhile), Gemini words with no nikud,
   // and words the child sees without nikud (partial mode) are not compared.
-  // Returns {marks: [{key, index, word, dicta, gemini}], compared, skippedLines}.
+  // Only differences in the reading are marked (sameReading); every difference is listed in diffs, with its kinds.
+  // Returns {marks: [{key, index, word, dicta, gemini}], diffs: [{key, index, dicta, gemini, kinds, reading}],
+  // compared, skippedLines}.
   function compareSecond(lesson, sent, got) {
     var byKey = {};
     slots(lesson, true).forEach(function (s) { byKey[s.key] = words(s.get()); });
     var targets = lesson.targetWords.map(function (t) { return t.word; });
     var marks = [];
+    var diffs = [];
     var compared = 0;
     var skippedLines = 0;
     sent.forEach(function (line, i) {
@@ -475,10 +566,77 @@
         if (!ours || H.bare(ours) !== H.bare(gem) || !H.hasNikud(gem) || !H.hasNikud(ours)) return;
         if (!H.hasNikud(H.displayText(ours, lesson.nikudMode, targets))) return;
         compared++;
-        if (!sameReading(ours, gem)) marks.push({ key: ref.key, index: ref.index, word: ours, dicta: ours, gemini: gem });
+        if (H.normalize(ours) === gem) return;
+        var reading = !sameReading(ours, gem);
+        diffs.push({ key: ref.key, index: ref.index, dicta: ours, gemini: gem, kinds: diffKinds(ours, gem), reading: reading });
+        if (reading) marks.push({ key: ref.key, index: ref.index, word: ours, dicta: ours, gemini: gem });
       });
     });
-    return { marks: marks, compared: compared, skippedLines: skippedLines };
+    return { marks: marks, diffs: diffs, compared: compared, skippedLines: skippedLines };
+  }
+
+  /* ---------- Nikud after Dicta: only the lines that need it ---------- */
+
+  function hasUnvocalized(text) {
+    return words(text).some(function (w) { return H.isUnvocalized(w); });
+  }
+
+  // The lines that go to Dicta again after a first run: lines that changed since then (snapshot: the vocalized
+  // lines as Dicta's nikud left them, see nikudLines().vocal), and lines with Hebrew words that have no nikud
+  // (text that came in later, or words Dicta left without nikud). Without a snapshot: the second kind only.
+  function linesToNikud(lesson, snapshot) {
+    var left = null;
+    if (snapshot) {
+      left = {};
+      snapshot.forEach(function (v) { left[v] = (left[v] || 0) + 1; });
+    }
+    return nikudLines(lesson).filter(function (l) {
+      if (left && left[l.vocal]) { left[l.vocal]--; return hasUnvocalized(l.vocal); }
+      return left ? true : hasUnvocalized(l.vocal);
+    });
+  }
+
+  // Dicta's answer for some lines (pasted, or from the bridge), word by word, as compareNikud does for the whole
+  // text: words without nikud take Dicta's word (same letters required); vocalized words that differ are listed
+  // for the teacher's choice. Returns {fills: [{slot, index, word}], diffs: [...as compareNikud]} or {error, details}.
+  function lineFills(lesson, lines, pasted) {
+    var bySlot = {};
+    slots(lesson, true).forEach(function (s) { bySlot[s.key] = { slot: s, words: words(s.get()) }; });
+    var ours = [];
+    lines.forEach(function (l) { l.refs.forEach(function (r) { ours.push(r); }); });
+    var theirs = words(pasted);
+    if (ours.length !== theirs.length) {
+      return {
+        error: 'מספר המילים לא תואם: בשורות ששלחנו יש ' + ours.length + ' מילים, ובטקסט מדיקטה ' + theirs.length + '.',
+        details: ['ודאו שניקדתם בדיקטה בדיוק את השורות שהועתקו מכאן.']
+      };
+    }
+    var fills = [];
+    var diffs = [];
+    var bad = [];
+    ours.forEach(function (r, i) {
+      var s = bySlot[r.key];
+      var w = s && s.words[r.index];
+      var vocal = w && H.hasNikud(w);
+      var same = w && (vocal ? looseLetters(w) === looseLetters(theirs[i]) : H.bare(w) === H.bare(theirs[i]));
+      if (!same) { bad.push('"' + H.stripNikud(w || '') + '" מול "' + H.stripNikud(theirs[i]) + '"'); return; }
+      if (!vocal) {
+        if (H.hasNikud(theirs[i])) fills.push({ slot: s.slot, index: r.index, word: H.normalize(theirs[i]) });
+        return;
+      }
+      var spelling = H.bare(w) !== H.bare(theirs[i]);
+      if (!spelling && sameNikud(w, theirs[i])) return;
+      diffs.push({
+        slot: s.slot, index: r.index, ai: w, dicta: H.normalize(theirs[i]), spelling: spelling,
+        before: s.words.slice(Math.max(0, r.index - 3), r.index).join(' '),
+        after: s.words.slice(r.index + 1, r.index + 4).join(' '),
+        choice: 'ai'
+      });
+    });
+    if (bad.length) {
+      return { error: 'הטקסט מדיקטה שונה באותיות מהשורות ששלחנו (' + bad.length + ' מילים).', details: bad.slice(0, 5) };
+    }
+    return { fills: fills, diffs: diffs };
   }
 
   // The marks still on the word they were made for; a word edited since then loses its mark.
@@ -513,6 +671,10 @@
     sameReading: sameReading,
     compareSecond: compareSecond,
     liveMarks: liveMarks,
+    pronunciation: pronunciation,
+    diffKinds: diffKinds,
+    linesToNikud: linesToNikud,
+    lineFills: lineFills,
     slotByKey: slotByKey,
     words: words
   };

@@ -28,7 +28,8 @@
         var pos = 0;
         var mistakes = 0;
 
-        var head = el('div', null, el('div', { class: 'big-emoji', 'aria-hidden': 'true' }, target.emoji));
+        // An emoji this device cannot show is left out (the word itself is what the child builds).
+        var head = el('div', null, U.emojiShown(target.emoji) ? el('div', { class: 'big-emoji', 'aria-hidden': 'true' }, target.emoji) : null);
         if (ctx.hasVoice) {
           head.appendChild(el('button', { type: 'button', class: 'btn quiet small', 'aria-label': 'השמעה',
             onclick: function () { ctx.speak(target.word); } }, '🔊'));

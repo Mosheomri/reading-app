@@ -20,6 +20,8 @@
     request: null,    // what was asked from the AI, for validation; null for loaded files
     lesson: null,
     nikudVerified: null, // Review.signature of the text that was last vocalized with Dicta
+    nikudOnce: false,    // Dicta was applied to this lesson before: later, only the lines that need it go to Dicta
+    nikudLines: null,    // the vocalized lines (Review.nikudLines().vocal) when Dicta's nikud was last valid
     second: null,        // second opinion on Dicta's nikud from Gemini (see startSecondOpinion)
     link: ''
   };
@@ -40,7 +42,7 @@
     clearTimeout(saveDraftTimer);
     saveDraftTimer = setTimeout(function () {
       if (state.lesson) {
-        save(STORE_DRAFT, { lesson: state.lesson, request: state.request, nikudVerified: state.nikudVerified,
+        save(STORE_DRAFT, { lesson: state.lesson, request: state.request, nikudVerified: state.nikudVerified, nikudOnce: state.nikudOnce, nikudLines: state.nikudLines,
           second: state.second && state.second.status === 'done' ? { status: 'done', marks: state.second.marks } : null });
       }
     }, 400);
@@ -305,6 +307,8 @@
     state.lesson = lesson;
     state.request = request;
     state.nikudVerified = nikudVerified || null;
+    state.nikudOnce = !!nikudVerified;
+    state.nikudLines = nikudVerified ? vocalLines() : null;
     cancelSecondOpinion();
     state.maxStep = Math.min(state.maxStep, 4);
     resetCheckStep();
@@ -614,7 +618,7 @@
     var p = U.clear($('preview'));
     p.appendChild(el('h2', { style: 'text-align:center' }, slotText(lesson, 'title', lesson.title, mark)));
     p.appendChild(el('div', { class: 'target-chips' }, lesson.targetWords.map(function (t, i) {
-      return el('span', { class: 'chip' }, t.emoji + ' ', slotText(lesson, 'targetWords[' + i + '].word', t.word, mark));
+      return el('span', { class: 'chip' }, U.emojiShown(t.emoji) ? t.emoji + ' ' : null, slotText(lesson, 'targetWords[' + i + '].word', t.word, mark));
     })));
     var second = secondBox(true);
     if (second) p.appendChild(second);
@@ -640,12 +644,15 @@
     if (!RV.hasAnyNikud(lesson)) return msgBox('info', 'השיעור עדיין בלי ניקוד. הניקוד יתווסף בשלב הבא, בעזרת הנקדן של דיקטה.');
     var missing = lesson.nikudMode === 'full' ? L.unvocalizedWords(lesson) : [];
     if (missing.length) {
-      return msgBox('info', 'מילים בלי ניקוד (מסומנות באדום). הן ינוקדו בשלב הניקוד בדיקטה:',
-        [missing.slice(0, 15).join(', ') + (missing.length > 15 ? ' ועוד ' + (missing.length - 15) : '')]);
+      var list = [missing.slice(0, 15).join(', ') + (missing.length > 15 ? ' ועוד ' + (missing.length - 15) : '')];
+      return state.nikudOnce
+        ? msgBox('info', 'מילים בלי ניקוד (מסומנות באדום), שנוספו אחרי הניקוד או שדיקטה לא ניקדה. ' +
+            'הן ינוקדו בדיקטה במעבר לשלב הבדיקה (רק השורות שלהן):', list)
+        : msgBox('info', 'מילים בלי ניקוד (מסומנות באדום). הן ינוקדו בשלב הניקוד בדיקטה:', list);
     }
     if (!nikudDone()) {
-      return msgBox('info', state.nikudVerified
-        ? 'הטקסט השתנה מאז הניקוד בדיקטה. צריך לנקד שוב בשלב הבא.'
+      return msgBox('info', state.nikudOnce
+        ? 'הטקסט השתנה מאז הניקוד בדיקטה. בשלב הבא בודקים אותו שוב.'
         : 'בשלב הבא משווים את הניקוד לנקדן של דיקטה.');
     }
     return null;
@@ -743,17 +750,67 @@
     U.clear($('nikudList'));
   }
 
+  // Dicta's nikud is on the text as it is now (also after choosing between versions of a word).
+  function markNikudVerified() {
+    state.nikudVerified = RV.signature(state.lesson);
+    state.nikudOnce = true;
+    state.nikudLines = vocalLines();
+  }
+
+  function vocalLines() {
+    return RV.nikudLines(state.lesson).map(function (l) { return l.vocal; });
+  }
+
+  // After a first Dicta run: the lines to send to Dicta now (changed since then, or with words without nikud).
+  function linesToDicta() {
+    return RV.linesToNikud(state.lesson, state.nikudLines);
+  }
+
   // The Dicta result is tied to the text it was applied to.
   function nikudIsStale() {
     return state.nikudVerified !== null && state.nikudVerified !== RV.signature(state.lesson);
   }
 
+  // A change after Dicta: only the changed lines (and lines with words without nikud) go to Dicta again
+  // (renikudIfNeeded). A change undone leaves nothing to send, and the nikud is valid again.
   function dropStaleNikud() {
     if (!nikudIsStale()) return;
+    var lines = linesToDicta();
+    if (state.nikudOnce && !lines.length) { markNikudVerified(); saveDraftSoon(); return; }
     state.nikudVerified = null;
     saveDraftSoon();
     clearNikudResults();
-    $('nikudMsgs').appendChild(msgBox('info', 'הטקסט השתנה מאז הניקוד. העתיקו את הטקסט מחדש ונקדו שוב בדיקטה.'));
+    $('nikudMsgs').appendChild(staleNikudMsg(lines.length));
+  }
+
+  function linesLabel(n) { return n === 1 ? 'שורה אחת' : n + ' שורות'; }
+
+  // What to do after a change, in the words of this step.
+  function staleNikudMsg(n) {
+    if (!state.nikudOnce) return msgBox('info', 'הטקסט השתנה מאז הניקוד. נקדו שוב בדיקטה.');
+    return msgBox('info', 'הטקסט השתנה אחרי הניקוד (' + linesLabel(n) + '). בדיקטה ינוקדו רק השורות שהשתנו:',
+      [DB.known() ? 'זה קורה אוטומטית בלחיצה הבאה (סיום אישור ההצעות, מעבר לבדיקה או יצירת קישור), או בכפתור "נקד אוטומטית בדיקטה".'
+        : 'לחצו על "נקד אוטומטית בדיקטה", או העתיקו (רק השורות שהשתנו) ונקדו ידנית.']);
+  }
+
+  // Inside a click (window.open needs one) and with the Dicta bridge known: vocalize the lines that need it now.
+  function renikudIfNeeded() {
+    if (!state.lesson || !nikudRequired() || !state.nikudOnce || DB.running() || !DB.known()) return;
+    if (!linesToDicta().length) return;
+    if ($('reviewList').querySelector('.review-item:not(.accepted):not(.rejected)')) return; // after the last decision
+    var activation = navigator.userActivation;
+    if (activation && !activation.isActive) return;
+    autoNikud();
+  }
+
+  // Words Dicta left without nikud: listed, and the button sends only their lines.
+  function warnUnvocalized(box) {
+    if (state.lesson.nikudMode !== 'full') return;
+    var missing = L.unvocalizedWords(state.lesson);
+    if (!missing.length) return;
+    box.appendChild(msgBox('warn', 'דיקטה לא ניקדה ' + (missing.length === 1 ? 'מילה אחת' : missing.length + ' מילים') + ':',
+      [missing.slice(0, 15).join(', ') + (missing.length > 15 ? ' ועוד ' + (missing.length - 15) : ''),
+        'לחצו שוב על "נקד אוטומטית בדיקטה": יישלחו רק השורות שלהן.']));
   }
 
   // Step 5 layout depends on the nikud mode and on whether the lesson has nikud yet.
@@ -772,13 +829,19 @@
     U.clear($('checkStepMsgs'));
     dropStaleNikud();
     syncCheckStep();
+    renikudIfNeeded();
     if (nikudRequired() && nikudDone() && !$('nikudMsgs').children.length) {
       $('nikudMsgs').appendChild(msgBox('ok', 'הטקסט מנוקד ✓'));
     }
   }
 
   function goToLink() {
+    dropStaleNikud();
     var blockers = linkBlockers();
+    if (blockers.indexOf('NIKUD') !== -1 && state.nikudOnce && DB.known() && !DB.running()) {
+      showStep(5); // vocalizes the changed lines (enterCheckStep), then the teacher makes the link
+      return;
+    }
     if (!blockers.length) { showStep(6); return; }
     if (state.step !== 5) showStep(5);
     var msgs = U.clear($('checkStepMsgs'));
@@ -830,7 +893,7 @@
       item.reason ? el('p', { class: 'muted small' }, item.reason) : null,
       // A fix without nikud replaces vocalized text with plain letters.
       loc && !H.hasNikud(item.fix) && H.hasNikud(loc.slot.get().slice(loc.start, loc.end))
-        ? el('p', { class: 'small fix-note' }, 'ℹ️ התיקון בלי ניקוד. אחרי האישור צריך לנקד שוב בדיקטה (חלק 2).')
+        ? el('p', { class: 'small fix-note' }, 'ℹ️ התיקון בלי ניקוד. אחרי האישור השורה שלו תנוקד שוב בדיקטה (רק השורות שהשתנו).')
         : null,
       actions);
 
@@ -871,12 +934,16 @@
     var btn = $('autoNikud');
     var sig = RV.signature(state.lesson);
     var status = el('div', { class: 'msg info', role: 'status' });
+    // After a first Dicta run: only the lines that need it. Nothing changed: the whole text again (the teacher asked).
+    var lines = state.nikudOnce ? linesToDicta() : null;
+    if (lines && !lines.length) lines = null;
     btn.disabled = true;
-    if (auto && auto.stages.nikud.state === 'wait') stage('nikud', 'active');
-    DB.start(RV.plainText(state.lesson), {
+    var what = lines ? 'את ' + (lines.length === 1 ? 'השורה שהשתנתה' : 'השורות שהשתנו (' + lines.length + ')') : 'את הטקסט';
+    if (auto && auto.stages.nikud.state !== 'active') stage('nikud', 'active', lines ? 'מנקד בדיקטה ' + what + '…' : '');
+    DB.start(lines ? lines.map(function (l) { return l.text; }).join('\n') : RV.plainText(state.lesson), {
       status: function (kind, info) {
         status.textContent = kind === 'opening' ? 'פותחים את דיקטה בחלון חדש…'
-          : 'דיקטה מנקדת את הטקסט…' + (info.parts > 1 ? ' (חלק ' + info.part + ' מתוך ' + info.parts + ')' : '');
+          : 'דיקטה מנקדת ' + what + '…' + (info.parts > 1 ? ' (חלק ' + info.part + ' מתוך ' + info.parts + ')' : '');
         if (!status.parentNode) msgs.appendChild(status);
       },
       result: function (text) {
@@ -888,7 +955,7 @@
           return;
         }
         $('dictaText').value = text;
-        compareNikud();
+        if (lines) applyLineNikud(lines, text); else compareNikud();
       },
       fail: function (reason, message) {
         btn.disabled = false;
@@ -926,17 +993,26 @@
   }
 
   // Unvocalized words take Dicta's nikud directly; vocalized words that differ are listed for a choice.
+  // After a first Dicta run, the pasted text is the lines that needed nikud ("העתק" copies only them).
   function compareNikud() {
+    if (state.nikudOnce) {
+      var lines = linesToDicta();
+      var n = 0;
+      lines.forEach(function (l) { n += l.refs.length; });
+      // The pasted text is the changed lines (what "העתק" copies now), or else the whole text as before.
+      if (lines.length && RV.words($('dictaText').value).length === n) { applyLineNikud(lines, $('dictaText').value); return; }
+    }
     var msgs = U.clear($('nikudMsgs'));
     var list = U.clear($('nikudList'));
     U.clear($('checkStepMsgs'));
     var r = RV.compareNikud(state.lesson, $('dictaText').value);
     if (r.error) { msgs.appendChild(msgBox('error', r.error, r.details)); nikudStageFailed(); return; }
     var filled = RV.applyFills(r.fills);
-    state.nikudVerified = RV.signature(state.lesson);
+    markNikudVerified();
     changed();
     syncCheckStep();
     nikudStageDone();
+    warnUnvocalized(msgs);
     startSecondOpinion(); // only with a Gemini key; in the background
     if (filled) msgs.appendChild(msgBox('ok', 'הניקוד של דיקטה הוחל על ' + (filled === 1 ? 'מילה אחת' : filled + ' מילים') + ' ✓'));
     if (!r.diffs.length) {
@@ -944,14 +1020,41 @@
       return;
     }
 
-    msgs.appendChild(msgBox('info', 'נמצאו ' + r.diffs.length + ' מילים מנוקדות שהניקוד שלהן שונה (או הכתיב). בחרו לכל מילה את הגרסה הנכונה.'));
+    showNikudDiffs(r.diffs, msgs, list);
+  }
+
+  // Vocalized words whose nikud (or spelling) differs from Dicta's: the teacher picks a version for each.
+  function showNikudDiffs(diffs, msgs, list) {
+    msgs.appendChild(msgBox('info', 'נמצאו ' + diffs.length + ' מילים מנוקדות שהניקוד שלהן שונה (או הכתיב). בחרו לכל מילה את הגרסה הנכונה.'));
     var acceptAll = el('button', { type: 'button', class: 'btn small' }, 'קבל את כל דיקטה');
     list.appendChild(el('div', { class: 'row', style: 'margin-bottom:10px' }, acceptAll));
-    var rows = r.diffs.map(nikudRow);
+    var rows = diffs.map(nikudRow);
     rows.forEach(function (row) { list.appendChild(row.node); });
     acceptAll.addEventListener('click', function () {
       rows.forEach(function (row) { row.pick('dicta'); });
     });
+  }
+
+  // Dicta's nikud for some lines only (text added after the first run, or words Dicta left without nikud).
+  function applyLineNikud(lines, text) {
+    var msgs = U.clear($('nikudMsgs'));
+    var list = U.clear($('nikudList'));
+    U.clear($('checkStepMsgs'));
+    var r = RV.lineFills(state.lesson, lines, text);
+    if (r.error) { msgs.appendChild(msgBox('error', r.error, r.details)); nikudStageFailed(); return; }
+    var filled = RV.applyFills(r.fills);
+    markNikudVerified();
+    changed();
+    syncCheckStep();
+    nikudStageDone();
+    msgs.appendChild(msgBox('ok', 'דיקטה ניקדה ' + (lines.length === 1 ? 'את השורה שהשתנתה' : 'את ' + lines.length + ' השורות שהשתנו') +
+      ' (' + (filled === 1 ? 'מילה אחת' : filled + ' מילים') + ') ✓'));
+    warnUnvocalized(msgs);
+    if (r.diffs.length) showNikudDiffs(r.diffs, msgs, list);
+    // The second opinion on these lines only; marks elsewhere stay.
+    var ids = {};
+    lines.forEach(function (l) { ids[l.refs[0].key + '#' + l.refs[0].index] = true; });
+    startSecondOpinion(RV.nikudLines(state.lesson).filter(function (l) { return ids[l.refs[0].key + '#' + l.refs[0].index]; }));
   }
 
   function nikudRow(d) {
@@ -973,7 +1076,7 @@
       if (nikudIsStale()) { dropStaleNikud(); return; }
       if (!RV.setWord(d.slot, d.index, choice === 'ai' ? d.ai : d.dicta)) { toast('לא הצלחתי להחליף את המילה.'); return; }
       d.choice = choice;
-      state.nikudVerified = RV.signature(state.lesson);
+      markNikudVerified();
       show();
       changed();
     }
@@ -990,12 +1093,15 @@
   var lastMark = null; // the mark opened last, for "הבאה"
 
   // state.second: null, or {status: 'running' | 'done' | 'failed', message, marks: [{key, index, word, dicta, gemini, checked}]}
-  function startSecondOpinion() {
+  // only: some lines (Review.nikudLines entries) after a partial Dicta run; the marks on other lines stay.
+  function startSecondOpinion(only) {
     var key = G.getKey();
     if (!key || !state.lesson || !nikudRequired() || !nikudDone()) return;
+    if (only && !only.length) return;
     var run = ++secondRuns;
     var lesson = state.lesson;
-    var chunks = RV.nikudChunks(RV.nikudLines(lesson), G.config.nikudChunkChars);
+    var before = only && state.second && state.second.status === 'done' ? state.second : null;
+    var chunks = RV.nikudChunks(only || RV.nikudLines(lesson), G.config.nikudChunkChars);
     var sent = [];
     var got = [];
     var i = 0;
@@ -1020,7 +1126,17 @@
       if (!got.some(function (g) { return g != null; })) throw new Error('Gemini החזיר מספר שורות שונה מהטקסט ששלחנו.');
       var r = RV.compareSecond(state.lesson, sent, got);
       r.marks.forEach(function (m) { m.checked = false; });
-      state.second = { status: 'done', marks: r.marks };
+      var marks = r.marks;
+      var diffs = r.diffs;
+      if (before) {
+        var redone = {};
+        sent.forEach(function (l) { l.refs.forEach(function (ref) { redone[ref.key + '#' + ref.index] = true; }); });
+        var keep = function (m) { return !redone[m.key + '#' + m.index]; };
+        marks = RV.liveMarks(state.lesson, before.marks).filter(keep).concat(marks);
+        diffs = (before.diffs || []).filter(keep).concat(diffs);
+      }
+      state.second = { status: 'done', marks: marks, diffs: diffs, compared: r.compared + (before ? before.compared || 0 : 0) };
+      logSecond(state.second);
       saveDraftSoon();
       renderSecond();
     }).catch(function (e) {
@@ -1028,6 +1144,44 @@
       state.second = { status: 'failed', message: (e && e.message) || '', marks: [] };
       renderSecond();
     });
+  }
+
+  // The differences by kind, for the console and the downloaded report: {kind: {count, reading, examples}}.
+  function secondSummary(sec) {
+    var out = {};
+    (sec.diffs || []).forEach(function (d) {
+      d.kinds.forEach(function (k) {
+        var o = out[k] || (out[k] = { count: 0, reading: 0, examples: [] });
+        o.count++;
+        if (d.reading) o.reading++;
+        if (o.examples.length < 5) o.examples.push(H.stripNikud(d.dicta) + ': ' + d.dicta + ' / ' + d.gemini);
+      });
+    });
+    return out;
+  }
+
+  function logSecond(sec) {
+    console.info('[Gemini] nikud-check: ' + sec.compared + ' words compared, ' + (sec.diffs || []).length + ' differ, ' +
+      sec.marks.length + ' read differently (marked)');
+    var sum = secondSummary(sec);
+    if (console.table && Object.keys(sum).length) {
+      console.table(Object.keys(sum).map(function (k) { return { kind: k, count: sum[k].count, marked: sum[k].reading, example: sum[k].examples[0] }; }));
+    }
+  }
+
+  // Every difference between Dicta and Gemini, with its kinds, as a JSON file (tests/nikud_diff_report.py sums them up).
+  function downloadSecondReport() {
+    var sec = state.second;
+    var data = {
+      title: H.stripNikud(state.lesson.title || ''), level: state.lesson.level || '', nikudMode: state.lesson.nikudMode,
+      words: L.check(state.lesson, state.request).wordCount, compared: sec.compared, summary: secondSummary(sec),
+      diffs: (sec.diffs || []).map(function (d) { return { field: d.key, index: d.index, dicta: d.dicta, gemini: d.gemini, kinds: d.kinds, marked: d.reading }; })
+    };
+    var a = el('a', { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })),
+      download: 'nikud-compare-' + (data.title.replace(/[\\/:*?"<>|\s]+/g, '-') || 'lesson') + '.json' });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   function cancelSecondOpinion() {
@@ -1079,14 +1233,17 @@
       return el('div', { class: 'msg warn small second-status' },
         el('div', { class: 'second-bar' },
           el('strong', null, 'הבדיקה הכפולה לא רצה'),
-          el('button', { type: 'button', class: 'btn small', onclick: startSecondOpinion }, '↻ נסה שוב')),
+          el('button', { type: 'button', class: 'btn small', onclick: function () { startSecondOpinion(); } }, '↻ נסה שוב')),
         s.message ? el('div', { class: 'muted small' }, s.message) : null);
     }
     var n = pendingMarks().length;
+    var report = s.diffs && s.diffs.length
+      ? el('button', { type: 'button', class: 'linkish small', onclick: downloadSecondReport }, 'פירוט כל ההבדלים (קובץ)')
+      : null;
     if (!n) {
       return el('div', { class: 'msg ok small second-status' }, s.marks.length
         ? 'הבדיקה הכפולה: כל המילים נבדקו ✓'
-        : 'הבדיקה הכפולה: Gemini ניקד כמו דיקטה ✓');
+        : 'הבדיקה הכפולה: Gemini ניקד כמו דיקטה ✓', report ? ' ' : null, report);
     }
     var count = n === 1 ? 'מילה אחת לבדיקה' : n + ' מילים לבדיקה';
     return el('div', { class: 'msg warn small second-status' },
@@ -1095,8 +1252,8 @@
         inPreview ? el('button', { type: 'button', class: 'btn small', onclick: nextMark }, 'הבאה ←') : null,
         inPreview ? el('button', { type: 'button', class: 'btn small quiet', onclick: markAllChecked }, 'סמן הכול כבדוק') : null,
         inPreview ? null : el('button', { type: 'button', class: 'btn small', onclick: function () { showStep(4); } }, 'לתצוגה המקדימה')),
-      el('div', { class: 'muted small' }, 'דיקטה ו-Gemini ניקדו אותן אחרת. המילים מסומנות בקו כתום' +
-        (inPreview ? '; לחצו על מילה כדי לבחור.' : ' בתצוגה המקדימה.') + ' עד שתבחרו, נשאר הניקוד של דיקטה.'));
+      el('div', { class: 'muted small' }, 'דיקטה ו-Gemini ניקדו אותן כך שהן נקראות אחרת. המילים מסומנות בקו כתום' +
+        (inPreview ? '; לחצו על מילה כדי לבחור.' : ' בתצוגה המקדימה.') + ' עד שתבחרו, נשאר הניקוד של דיקטה. ', report));
   }
 
   function markAllChecked() {
@@ -1180,7 +1337,7 @@
       var verified = nikudDone();
       if (!RV.setWord(slot, m.index, word)) return 'לא הצלחתי להחליף את המילה.';
       m.word = word;
-      if (verified) state.nikudVerified = RV.signature(state.lesson); // still Dicta-checked: only nikud chosen
+      if (verified) markNikudVerified(); // still Dicta-checked: only nikud chosen
     }
     m.checked = true;
     changed();
@@ -1519,7 +1676,7 @@
 
   // Called after every approve / reject. The last decision is a click, so Dicta may open in a new window.
   function reviewDecided() {
-    if (!auto || !auto.waitingApproval) return;
+    if (!auto || !auto.waitingApproval) { dropStaleNikud(); renikudIfNeeded(); return; }
     if ($('reviewList').querySelector('.review-item:not(.accepted):not(.rejected)')) return;
     auto.waitingApproval = false;
     stage('approve', 'done');
@@ -1618,6 +1775,11 @@
     $('copyReviewPrompt').addEventListener('click', function () { copy($('reviewPromptText').textContent, 'הפרומפט הועתק! הדביקו בצ׳אט.'); });
     $('parseReview').addEventListener('click', parseReview);
     $('copyPlain').addEventListener('click', function () {
+      var lines = state.nikudOnce ? linesToDicta() : [];
+      if (lines.length) {
+        copy(lines.map(function (l) { return l.text; }).join('\n'), 'הועתקו בלי ניקוד רק השורות שצריך לנקד (' + lines.length + '). הדביקו אותן בדיקטה.');
+        return;
+      }
       copy(RV.plainText(state.lesson), 'הטקסט הועתק בלי ניקוד. עכשיו הדביקו אותו בנקדן של דיקטה.');
     });
     $('autoNikud').addEventListener('click', autoNikud);
@@ -1658,6 +1820,8 @@
         $('resumeDraft').addEventListener('click', function () {
           state.maxStep = 3;
           acceptLesson(c.lesson, draft.request || null, draft.nikudVerified);
+          state.nikudOnce = !!(draft.nikudOnce || draft.nikudVerified);
+          if (Array.isArray(draft.nikudLines)) state.nikudLines = draft.nikudLines;
           if (draft.second && Array.isArray(draft.second.marks)) { state.second = draft.second; renderSecond(); }
         });
       }

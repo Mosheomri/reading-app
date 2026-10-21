@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         קוראים ביחד – גשר לדיקטה
 // @namespace    https://mosheomri.github.io/reading-app/
-// @version      1.0.0
+// @version      1.1.0
 // @description  מנקד בנקדן של דיקטה את הטקסט שנשלח מאתר "קוראים ביחד" ומחזיר אותו לאתר. פועל רק כשהאתר פתח את דיקטה.
 // @match        https://nakdan.dicta.org.il/*
 // @run-at       document-idle
@@ -38,6 +38,7 @@
   var ELEMENT_TIMEOUT = 15000; // waiting for Dicta's page / menu to appear
   var PART_TIMEOUT = 30000;    // waiting for one part to be vocalized
   var STABLE_MS = 800;         // the result must not change for this long
+  var STABLE_PARTIAL_MS = 4000; // the same when some Hebrew words still have no nikud: Dicta may not be done yet
   var READY_EVERY = 1000;
 
   var opener = window.opener;
@@ -103,6 +104,10 @@
     var words = s.split(/\s+/).filter(function (w) { return LETTERS_RE.test(w); });
     var done = words.filter(function (w) { return HAS_NIKUD_RE.test(w); }).length;
     return words.length > 0 && done >= Math.ceil(words.length * 0.9);
+  }
+
+  function allVocalized(s) {
+    return s.split(/\s+/).filter(function (w) { return LETTERS_RE.test(w); }).every(function (w) { return HAS_NIKUD_RE.test(w); });
   }
 
   // Letters only, without ו/י: Dicta's ktiv male may add a mater lectionis. The site checks the exact letters.
@@ -198,7 +203,7 @@
           if (resultText() !== last) { check(); return; }
           finish();
           resolve(last);
-        }, STABLE_MS);
+        }, allVocalized(now) ? STABLE_MS : STABLE_PARTIAL_MS);
       }
       // The result node may be replaced, so watch the whole page, and poll as a backup.
       observer = new MutationObserver(check);

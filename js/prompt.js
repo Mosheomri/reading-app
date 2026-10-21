@@ -122,7 +122,10 @@
       '- ' + level.sentence
     );
     level.language.forEach(function (l) { lines.push('- ' + l); });
-    lines.push(NO_NIKUD, KTIV, '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה.', NO_EMOJI);
+    lines.push(NO_NIKUD, KTIV,
+      '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה. רק אימוג׳י נפוץ וותיק שמוצג בכל מכשיר (כמו 🐶 🌳 ⚽ 🏠 🍎): ' +
+        'בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.',
+      NO_EMOJI);
     return lines;
   }
 

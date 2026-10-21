@@ -122,8 +122,12 @@
     var s = screen();
     s.appendChild(el('div', { class: 'celebrate', 'aria-hidden': 'true' }, '📖'));
     s.appendChild(el('h1', null, R.text(lesson, lesson.title) || 'שיעור קריאה'));
+    // An emoji this device cannot show is replaced by its word.
     s.appendChild(el('div', { class: 'big-emoji', style: 'font-size:2.6rem;letter-spacing:6px', 'aria-hidden': 'true' },
-      lesson.targetWords.map(function (t) { return t.emoji; }).join(' ')));
+      lesson.targetWords.map(function (t, i) {
+        var shown = U.emojiShown(t.emoji);
+        return [i ? ' ' : '', shown ? t.emoji : el('span', { class: 'emoji-word' }, R.text(lesson, t.word))];
+      })));
     s.appendChild(el('p', { class: 'lead' }, 'נשחק, נקרא סיפור ונענה על שאלות'));
     s.appendChild(el('div', { class: 'stage-actions' },
       el('button', { type: 'button', class: 'btn primary big', onclick: function () {

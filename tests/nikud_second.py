@@ -164,6 +164,31 @@ with sync_playwright() as p:
     check(unit["meteg"] and unit["holamVav"] and unit["qamatsQatan"] and unit["order"] and not unit["differ"],
           "normalization: meteg, holam for vav, qamats qatan and mark order ignored; a different vowel is a disagreement (%s)" % unit)
     check(unit["chunks"] == [2, 1, 1], "a long text is split into calls of up to N characters (a longer line on its own) (%s)" % unit["chunks"])
+    # Only differences that change the reading are marked; every difference gets its kinds (for the report)
+    reading = tmp.evaluate("""(pairs) => pairs.map(([a, b]) => Review.sameReading(a, b))""", [
+        ["הַגִּנָּה", "הַגִנָה"],        # dagesh in ג / נ: not read
+        ["כַּדּוּר", "כַּדוּר"],          # dagesh in ד
+        ["אָכַל", "אַכַל"],              # qamats / patah: both a
+        ["יֵלֵךְ", "יֶלֵךְ"],             # tsere / segol: both e
+        ["לְדָנִי", "לֶדָנִי"],           # sheva / segol: e
+        ["עֲנָנִים", "עַנָנִים"],         # hataf patah / patah
+        ["לוֹ", "לֹו"],                  # holam on the vav or on the letter before
+        ["שָׁלוֹם", "שָלוֹם"],           # no shin dot: fits shin
+        ["בַּיִת", "בַיִת"],              # b / v: read differently
+        ["כֶּלֶב", "כֶלֶב"],             # k / kh
+        ["שָׂם", "שָׁם"],                # sin / shin
+        ["יֵשׁ", "יִשׁ"],                # e / i
+        ["אֲנִי", "אְנִי"],              # hataf patah / sheva: a / nothing
+        ["סוּס", "סוֹס"],                # u / o
+    ])
+    check(reading[:8] == [True] * 8, "read the same: dagesh outside בכ״פ, qamats/patah, tsere/segol, sheva/e, hataf/its vowel, holam placement, no dot (%s)" % reading[:8])
+    check(reading[8:] == [False] * 6, "read differently: dagesh in ב/כ, shin/sin, other vowels, hataf/sheva, shuruk/holam (%s)" % reading[8:])
+    kinds = tmp.evaluate("""(pairs) => pairs.map(([a, b]) => Review.diffKinds(a, b))""", [
+        ["הַגִּנָּה", "הַגִנָה"], ["בַּיִת", "בַיִת"], ["אָכַל", "אַכַל"], ["יֵלֵךְ", "יֶלֵךְ"], ["אֲנִי", "אְנִי"],
+        ["כָּל", "כ\u05BC\u05C7ל"], ["לוֹ", "לֹו"], ["שָׂם", "שָׁם"], ["קָטָן", "קָ\u05BDטָן"], ["לְדָנִי", "לָדָנִי"]])
+    check(kinds == [["דגש (באות אחרת)"], ["דגש בבכ״פ"], ["פתח / קמץ"], ["צירה / סגול"], ["שווא / חטף"], ["קמץ קטן"],
+                    ["חולם / שורוק"], ["שי״ן / שׂי״ן"], ["מתג / טעמים"], ["שווא / תנועה"]],
+          "kinds of difference for the report (%s)" % kinds)
     review_prompt = tmp.evaluate("(l) => Review.buildReviewPrompt(l)", plain)
     check("ארבעה קירות ביתם" in review_prompt and "לא הגיוני או מוזר" in review_prompt and "מסוג style" in review_prompt,
           "review prompt: checks sentences that make no sense or are odd, as a style suggestion with a reason")
@@ -181,6 +206,7 @@ with sync_playwright() as p:
     w = first_story[1].split(" ")
     w[1] = "יַשׁ"                     # יַשׁ instead of יֵשׁ: a different reading → marked
     w[3] = w[3][0] + "ֽ" + w[3][1:]         # a meteg only → not marked
+    w[4] = w[4].replace("\u05B7", "\u05B8", 1)  # qamats for patah, read the same: listed, not marked
     w[6] = w[6][:-1] + "א" + w[6][-1]            # other letters (בּוֹנִיא) → not compared
     q = question[1].split(" ")
     q[0] = "אַיךְ"               # אַיךְ instead of אֵיךְ → marked
@@ -215,6 +241,16 @@ with sync_playwright() as p:
     m = marks(page)
     check(sorted(m) == sorted(["story#1", "exercises[0].question#0"]),
           "two words marked: a different vowel; not the meteg-only word or the word with other letters (%s)" % m)
+    check(page.locator("#preview .second-status button:has-text('פירוט כל ההבדלים')").count() == 1,
+          "a button downloads the report of every difference")
+    with page.expect_download() as dl:
+        page.click("#preview .second-status button:has-text('פירוט כל ההבדלים')")
+    rep_data = json.load(open(dl.value.path(), encoding="utf-8"))
+    by_field = {(d["field"], d["index"]): d for d in rep_data["diffs"]}
+    check(by_field.get(("story", 4), {}).get("kinds") == ["פתח / קמץ"] and by_field[("story", 4)]["marked"] is False
+          and by_field.get(("story", 3), {}).get("kinds") == ["מתג / טעמים"] and by_field[("story", 1)]["marked"] is True
+          and rep_data["summary"]["פתח / קמץ"]["count"] == 1 and rep_data["compared"] >= 4,
+          "report: every difference with its kinds and whether it is marked, and a summary by kind")
     bar = page.text_content("#preview .second-status")
     check("2 מילים לבדיקה" in bar and page.locator("#preview .second-status button:has-text('הבאה')").count() == 1
           and page.locator("#preview .second-status button:has-text('סמן הכול כבדוק')").count() == 1,

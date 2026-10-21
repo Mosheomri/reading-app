@@ -134,6 +134,49 @@
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   }
 
+  /* ---------- Emoji ---------- */
+
+  // Is the emoji shown by this device's fonts? Measured on a canvas: a missing emoji is drawn as the same box
+  // as a character no font has, and a sequence the device does not know falls apart into its parts (wider).
+  // Without a canvas, assume it is shown.
+  var emojiCache = {};
+  var emojiRef = null;
+  function emojiShown(e) {
+    e = String(e == null ? '' : e).trim();
+    if (!e) return false;
+    if (emojiCache.hasOwnProperty(e)) return emojiCache[e];
+    var ok = true;
+    try {
+      if (!emojiRef) {
+        var c = document.createElement('canvas').getContext('2d');
+        c.font = '40px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif';
+        emojiRef = { ctx: c, one: c.measureText('\uD83D\uDE00').width, tofu: c.measureText('\uDB7F\uDFFD').width };
+      }
+      var w = emojiRef.ctx.measureText(e).width;
+      var n = emojiCount(e);
+      var one = emojiRef.one;
+      if (one > 0) {
+        ok = w > 0 && Math.abs(w - n * emojiRef.tofu) > 0.5 && w <= n * one * 1.25 + 1 && w >= n * one * 0.6;
+      }
+      // A flag is two regional-indicator letters; a device without flags (Windows) draws them side by side.
+      var flag = e.match(/\uD83C[\uDDE6-\uDDFF]/);
+      if (ok && flag) ok = w < emojiRef.ctx.measureText(flag[0]).width * 1.5;
+    } catch (err) { ok = true; }
+    emojiCache[e] = ok;
+    return ok;
+  }
+
+  // How many emoji the text holds (grapheme clusters; one per code point outside the BMP without Intl.Segmenter).
+  function emojiCount(e) {
+    if (window.Intl && Intl.Segmenter) {
+      var n = 0;
+      var it = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(e)[Symbol.iterator]();
+      for (var r = it.next(); !r.done; r = it.next()) if (r.value.segment.trim()) n++;
+      return Math.max(1, n);
+    }
+    return Math.max(1, (e.match(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g) || []).length);
+  }
+
   window.Util = {
     el: el,
     clear: clear,
@@ -142,6 +185,7 @@
     copyText: copyText,
     speechReady: speechReady,
     speak: speak,
-    stopSpeaking: stopSpeaking
+    stopSpeaking: stopSpeaking,
+    emojiShown: emojiShown
   };
 })();
