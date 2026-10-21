@@ -20,6 +20,7 @@
     request: null,    // what was asked from the AI, for validation; null for loaded files
     lesson: null,
     nikudVerified: null, // Review.signature of the text that was last vocalized with Dicta
+    second: null,        // second opinion on Dicta's nikud from Gemini (see startSecondOpinion)
     link: ''
   };
 
@@ -38,7 +39,10 @@
   function saveDraftSoon() {
     clearTimeout(saveDraftTimer);
     saveDraftTimer = setTimeout(function () {
-      if (state.lesson) save(STORE_DRAFT, { lesson: state.lesson, request: state.request, nikudVerified: state.nikudVerified });
+      if (state.lesson) {
+        save(STORE_DRAFT, { lesson: state.lesson, request: state.request, nikudVerified: state.nikudVerified,
+          second: state.second && state.second.status === 'done' ? { status: 'done', marks: state.second.marks } : null });
+      }
     }, 400);
   }
 
@@ -301,6 +305,7 @@
     state.lesson = lesson;
     state.request = request;
     state.nikudVerified = nikudVerified || null;
+    cancelSecondOpinion();
     state.maxStep = Math.min(state.maxStep, 4);
     resetCheckStep();
     saveDraftSoon();
@@ -607,11 +612,16 @@
     // Before Dicta the whole lesson is unvocalized; marking every word would be noise.
     var mark = RV.hasAnyNikud(lesson);
     var p = U.clear($('preview'));
-    p.appendChild(el('h2', { style: 'text-align:center' }, previewText(lesson, lesson.title, mark)));
-    p.appendChild(el('div', { class: 'target-chips' }, lesson.targetWords.map(function (t) {
-      return el('span', { class: 'chip' }, t.emoji + ' ', previewText(lesson, t.word, mark));
+    p.appendChild(el('h2', { style: 'text-align:center' }, slotText(lesson, 'title', lesson.title, mark)));
+    p.appendChild(el('div', { class: 'target-chips' }, lesson.targetWords.map(function (t, i) {
+      return el('span', { class: 'chip' }, t.emoji + ' ', slotText(lesson, 'targetWords[' + i + '].word', t.word, mark));
     })));
-    p.appendChild(el('div', { class: 'story' }, R.story(lesson, null, mark)));
+    var second = secondBox(true);
+    if (second) p.appendChild(second);
+    var storyMarks = marksOf('story');
+    p.appendChild(el('div', { class: 'story' }, R.story(lesson, null, mark, storyMarks && function (span, index) {
+      if (storyMarks[index]) decorateMark(span, storyMarks[index]);
+    })));
     p.appendChild(el('h3', { style: 'margin-top:16px' }, 'תרגילים'));
     lesson.exercises.forEach(function (ex, i) {
       if (ex.unknown) return;
@@ -650,43 +660,45 @@
   function exercisePreview(lesson, ex, i, mark) {
     var box = el('div', { class: 'ex-preview' });
     var num = (i + 1) + '. ';
-    function t(s) { return previewText(lesson, s, mark); }
+    var base = 'exercises[' + i + ']';
+    // field: the key of the text in Review.slots, for the second-opinion marks.
+    function t(field, s) { return slotText(lesson, base + '.' + field, s, mark); }
     function optionList() {
       return el('ol', null, ex.options.map(function (o, j) {
-        return el('li', { class: j === ex.answer ? 'correct' : '' }, t(o), j === ex.answer ? ' ✓' : '');
+        return el('li', { class: j === ex.answer ? 'correct' : '' }, t('options[' + j + ']', o), j === ex.answer ? ' ✓' : '');
       }));
     }
     if (ex.type === 'mcq') {
-      box.appendChild(el('div', null, num, t(ex.question)));
+      box.appendChild(el('div', null, num, t('question', ex.question)));
       box.appendChild(optionList());
     } else if (ex.type === 'tf') {
-      box.appendChild(el('div', null, num, t(ex.statement)));
+      box.appendChild(el('div', null, num, t('statement', ex.statement)));
       box.appendChild(el('div', { class: 'correct' }, ex.answer === true ? 'נכון ✓' : ex.answer === false ? 'לא נכון ✓' : ''));
     } else if (ex.type === 'fill') {
-      box.appendChild(el('div', null, num, R.fillSentence(lesson, ex.sentence, null, mark)));
+      box.appendChild(el('div', null, num, fillText(lesson, base + '.sentence', ex.sentence, mark)));
       box.appendChild(optionList());
     } else if (ex.type === 'order') {
       box.appendChild(el('div', null, num + 'סידור משפטים (הילד יקבל אותם מעורבבים):'));
-      box.appendChild(el('ol', null, ex.sentences.map(function (s) { return el('li', null, t(s)); })));
+      box.appendChild(el('ol', null, ex.sentences.map(function (s, j) { return el('li', null, t('sentences[' + j + ']', s)); })));
     } else if (ex.type === 'open') {
-      box.appendChild(el('div', null, num, t(ex.question)));
-      box.appendChild(el('div', { class: 'sample' }, el('span', { class: 'muted' }, 'תשובה לדוגמה: '), t(ex.sampleAnswer)));
+      box.appendChild(el('div', null, num, t('question', ex.question)));
+      box.appendChild(el('div', { class: 'sample' }, el('span', { class: 'muted' }, 'תשובה לדוגמה: '), t('sampleAnswer', ex.sampleAnswer)));
     } else if (ex.type === 'locate') {
       var found = ex.sentence && L.findSentence(L.bareWords(lesson.story), ex.sentence) !== -1;
-      box.appendChild(el('div', null, num, t(ex.question)));
+      box.appendChild(el('div', null, num, t('question', ex.question)));
       box.appendChild(el('div', { class: found ? 'correct' : 'bad' },
-        el('span', { class: 'muted' }, 'הילד לוחץ בסיפור על: '), t(ex.sentence), found ? ' ✓' : ' ⚠️ לא נמצא בסיפור'));
+        el('span', { class: 'muted' }, 'הילד לוחץ בסיפור על: '), t('sentence', ex.sentence), found ? ' ✓' : ' ⚠️ לא נמצא בסיפור'));
     } else if (ex.type === 'message') {
       box.appendChild(el('div', null, num + 'מסר גלוי ומסר סמוי:'));
       [['visible', 'גלוי'], ['hidden', 'סמוי']].forEach(function (k) {
         var part = ex[k[0]];
-        var pb = el('div', { class: 'part' }, el('strong', null, k[1] + ': '), t(part.question));
+        var pb = el('div', { class: 'part' }, el('strong', null, k[1] + ': '), t(k[0] + '.question', part.question));
         if (part.options) {
           pb.appendChild(el('ol', null, part.options.map(function (o, j) {
-            return el('li', { class: j === part.answer ? 'correct' : '' }, t(o), j === part.answer ? ' ✓' : '');
+            return el('li', { class: j === part.answer ? 'correct' : '' }, t(k[0] + '.options[' + j + ']', o), j === part.answer ? ' ✓' : '');
           })));
         } else {
-          pb.appendChild(el('div', { class: 'sample' }, el('span', { class: 'muted' }, 'תשובה לדוגמה: '), t(part.sampleAnswer)));
+          pb.appendChild(el('div', { class: 'sample' }, el('span', { class: 'muted' }, 'תשובה לדוגמה: '), t(k[0] + '.sampleAnswer', part.sampleAnswer)));
         }
         box.appendChild(pb);
       });
@@ -925,6 +937,7 @@
     changed();
     syncCheckStep();
     nikudStageDone();
+    startSecondOpinion(); // only with a Gemini key; in the background
     if (filled) msgs.appendChild(msgBox('ok', 'הניקוד של דיקטה הוחל על ' + (filled === 1 ? 'מילה אחת' : filled + ' מילים') + ' ✓'));
     if (!r.diffs.length) {
       if (!filled) msgs.appendChild(msgBox('ok', 'הניקוד זהה לניקוד של דיקטה ✓'));
@@ -968,6 +981,240 @@
     dictaBtn.addEventListener('click', function () { pick('dicta'); });
     show();
     return { node: node, pick: pick };
+  }
+
+  /* 3. Second opinion on Dicta's nikud: Gemini vocalizes the same lines, words read differently are marked
+     in the preview for the teacher. Only with a Gemini key; runs in the background and never blocks the lesson. */
+
+  var secondRuns = 0;
+  var lastMark = null; // the mark opened last, for "הבאה"
+
+  // state.second: null, or {status: 'running' | 'done' | 'failed', message, marks: [{key, index, word, dicta, gemini, checked}]}
+  function startSecondOpinion() {
+    var key = G.getKey();
+    if (!key || !state.lesson || !nikudRequired() || !nikudDone()) return;
+    var run = ++secondRuns;
+    var lesson = state.lesson;
+    var chunks = RV.nikudChunks(RV.nikudLines(lesson), G.config.nikudChunkChars);
+    var sent = [];
+    var got = [];
+    var i = 0;
+    var current = function () { return run === secondRuns && state.lesson === lesson; };
+    state.second = { status: 'running', marks: [] };
+    renderSecond();
+    function next() {
+      if (i >= chunks.length) return Promise.resolve();
+      var chunk = chunks[i++];
+      var texts = chunk.map(function (l) { return l.text; });
+      return G.checkNikud(key, RV.buildNikudPrompt(texts)).then(function (text) {
+        var data = null;
+        try { data = JSON.parse(text); } catch (e) { /* not JSON: this chunk is not compared */ }
+        var back = data && Array.isArray(data.lines) && data.lines.length === texts.length ? data.lines : null;
+        if (!back) console.warn('[Gemini] nikud-check: the answer does not have the ' + texts.length + ' lines sent; that part is not compared.');
+        chunk.forEach(function (l, j) { sent.push(l); got.push(back ? back[j] : null); });
+        if (current()) return next();
+      });
+    }
+    next().then(function () {
+      if (!current()) return;
+      if (!got.some(function (g) { return g != null; })) throw new Error('Gemini החזיר מספר שורות שונה מהטקסט ששלחנו.');
+      var r = RV.compareSecond(state.lesson, sent, got);
+      r.marks.forEach(function (m) { m.checked = false; });
+      state.second = { status: 'done', marks: r.marks };
+      saveDraftSoon();
+      renderSecond();
+    }).catch(function (e) {
+      if (!current()) return;
+      state.second = { status: 'failed', message: (e && e.message) || '', marks: [] };
+      renderSecond();
+    });
+  }
+
+  function cancelSecondOpinion() {
+    secondRuns++;
+    state.second = null;
+    lastMark = null;
+    closeMarkDialog();
+    U.clear($('secondMsgs'));
+  }
+
+  // Marks still to check. Marks on words edited since the comparison are dropped for good.
+  function pendingMarks() {
+    if (!state.second || state.second.status !== 'done' || !state.lesson) return [];
+    state.second.marks = RV.liveMarks(state.lesson, state.second.marks);
+    return state.second.marks.filter(function (m) { return !m.checked; });
+  }
+
+  // {index: mark} for one slot's words, or null.
+  function marksOf(key) {
+    var out = null;
+    pendingMarks().forEach(function (m) {
+      if (m.key !== key) return;
+      out = out || {};
+      out[m.index] = m;
+    });
+    return out;
+  }
+
+  function markId(m) { return m.key + '#' + m.index; }
+
+  function renderSecond() {
+    var box = $('secondMsgs');
+    if (box) {
+      U.clear(box);
+      var b = secondBox(false);
+      if (b) box.appendChild(b);
+    }
+    if (state.step === 4) refreshPreview();
+  }
+
+  // The status line: in step 5 (inPreview false) and above the story in the preview.
+  function secondBox(inPreview) {
+    var s = state.second;
+    if (!s) return null;
+    if (s.status === 'running') {
+      return el('div', { class: 'msg info small second-status' }, 'בדיקה כפולה של הניקוד עם Gemini… (אפשר להמשיך בינתיים)');
+    }
+    if (s.status === 'failed') {
+      return el('div', { class: 'msg warn small second-status' },
+        el('div', { class: 'second-bar' },
+          el('strong', null, 'הבדיקה הכפולה לא רצה'),
+          el('button', { type: 'button', class: 'btn small', onclick: startSecondOpinion }, '↻ נסה שוב')),
+        s.message ? el('div', { class: 'muted small' }, s.message) : null);
+    }
+    var n = pendingMarks().length;
+    if (!n) {
+      return el('div', { class: 'msg ok small second-status' }, s.marks.length
+        ? 'הבדיקה הכפולה: כל המילים נבדקו ✓'
+        : 'הבדיקה הכפולה: Gemini ניקד כמו דיקטה ✓');
+    }
+    var count = n === 1 ? 'מילה אחת לבדיקה' : n + ' מילים לבדיקה';
+    return el('div', { class: 'msg warn small second-status' },
+      el('div', { class: 'second-bar' },
+        el('strong', { class: 'second-count' }, count),
+        inPreview ? el('button', { type: 'button', class: 'btn small', onclick: nextMark }, 'הבאה ←') : null,
+        inPreview ? el('button', { type: 'button', class: 'btn small quiet', onclick: markAllChecked }, 'סמן הכול כבדוק') : null,
+        inPreview ? null : el('button', { type: 'button', class: 'btn small', onclick: function () { showStep(4); } }, 'לתצוגה המקדימה')),
+      el('div', { class: 'muted small' }, 'דיקטה ו-Gemini ניקדו אותן אחרת. המילים מסומנות בקו כתום' +
+        (inPreview ? '; לחצו על מילה כדי לבחור.' : ' בתצוגה המקדימה.') + ' עד שתבחרו, נשאר הניקוד של דיקטה.'));
+  }
+
+  function markAllChecked() {
+    pendingMarks().forEach(function (m) { m.checked = true; });
+    saveDraftSoon();
+    renderSecond();
+  }
+
+  function nextMark() {
+    var list = pendingMarks();
+    if (!list.length) return;
+    var at = list.indexOf(lastMark);
+    var m = list[(at + 1) % list.length];
+    var node = document.querySelector('#preview .nikud-check[data-mark="' + markId(m) + '"]');
+    if (node) node.scrollIntoView({ block: 'center' });
+    openMark(m);
+  }
+
+  // A word of the preview that has a mark: orange underline, opens the choice.
+  function decorateMark(span, m) {
+    span.classList.add('nikud-check');
+    span.setAttribute('data-mark', markId(m));
+    span.setAttribute('role', 'button');
+    span.setAttribute('tabindex', '0');
+    span.title = 'דיקטה ו-Gemini ניקדו את המילה הזו אחרת. לחצו כדי לבחור.';
+    span.addEventListener('click', function () { openMark(m); });
+    span.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMark(m); }
+    });
+  }
+
+  function closeMarkDialog() {
+    var d = $('nikudCheckDialog');
+    if (!d) return;
+    if (d.open) d.close();
+    d.remove();
+  }
+
+  function openMark(m) {
+    var slot = RV.slotByKey(state.lesson, m.key);
+    if (!slot) return;
+    closeMarkDialog();
+    lastMark = m;
+    var ws = RV.words(slot.get());
+    var error = el('div', { class: 'msg error small', hidden: true });
+    var input = el('input', { type: 'text', value: m.word, lang: 'he', spellcheck: 'false', class: 'nikud-input', 'aria-label': 'עריכה ידנית של הניקוד' });
+    function choose(word) {
+      var problem = resolveMark(m, word);
+      if (problem) { error.textContent = problem; error.hidden = false; return; }
+      closeMarkDialog();
+    }
+    function pick(label, word) {
+      return el('button', { type: 'button', class: 'pick' + (word === m.word ? ' selected' : ''), onclick: function () { choose(word); } },
+        el('span', { class: 'pick-label' }, label), el('span', { class: 'pick-word' }, word));
+    }
+    var dlg = el('dialog', { class: 'nikud-dialog', id: 'nikudCheckDialog', 'aria-label': 'בדיקת ניקוד' },
+      el('div', { class: 'nikud-context' },
+        el('span', { class: 'muted small' }, slot.label + ': '),
+        ws.slice(Math.max(0, m.index - 4), m.index).join(' ') + ' ', el('mark', null, m.word), ' ' + ws.slice(m.index + 1, m.index + 5).join(' ')),
+      el('div', { class: 'row' }, pick('דיקטה', m.dicta), pick('Gemini', m.gemini)),
+      el('p', { class: 'small', style: 'margin:12px 0 4px' }, el('strong', null, 'או עריכה ידנית'), ' (רק הניקוד, האותיות נשארות):'),
+      el('div', { class: 'row' }, input,
+        el('button', { type: 'button', class: 'btn small primary', onclick: function () { choose(input.value); } }, 'שמירה')),
+      error,
+      el('div', { class: 'row', style: 'margin-top:12px' },
+        el('button', { type: 'button', class: 'btn small quiet', onclick: closeMarkDialog }, 'סגירה')));
+    dlg.addEventListener('close', function () { if (dlg.isConnected) dlg.remove(); });
+    document.body.appendChild(dlg);
+    dlg.showModal();
+  }
+
+  // The teacher's choice for a marked word: Dicta's, Gemini's or her own nikud. Returns an error message or null.
+  function resolveMark(m, word) {
+    var slot = RV.slotByKey(state.lesson, m.key);
+    word = H.normalize(word).trim();
+    if (!slot || RV.liveMarks(state.lesson, [m]).length !== 1) return 'המילה השתנתה בינתיים.';
+    if (RV.words(word).length !== 1 || word !== RV.words(word)[0] || H.bare(word) !== H.bare(m.word)) {
+      return 'אפשר לשנות כאן רק את הניקוד של המילה, בלי לשנות אותיות.';
+    }
+    if (word !== m.word) {
+      var verified = nikudDone();
+      if (!RV.setWord(slot, m.index, word)) return 'לא הצלחתי להחליף את המילה.';
+      m.word = word;
+      if (verified) state.nikudVerified = RV.signature(state.lesson); // still Dicta-checked: only nikud chosen
+    }
+    m.checked = true;
+    changed();
+    renderSecond();
+    return null;
+  }
+
+  // Preview text of one slot with its marked words; offset: word index of s inside the slot (fill sentences).
+  function slotText(lesson, key, s, mark, offset) {
+    var marks = marksOf(key);
+    if (!marks) return previewText(lesson, s, mark);
+    var out = el('span');
+    var k = (offset || 0) - 1;
+    H.tokenize(R.text(lesson, s || '')).forEach(function (seg) {
+      if (!seg.isWord) { out.appendChild(document.createTextNode(seg.text)); return; }
+      k++;
+      var span = el('span', { class: mark && lesson.nikudMode === 'full' && H.isUnvocalized(seg.text) ? 'no-nikud' : null }, seg.text);
+      if (marks[k]) decorateMark(span, marks[k]);
+      out.appendChild(span);
+    });
+    return out;
+  }
+
+  // A fill sentence ("___" for the blank) with its marked words.
+  function fillText(lesson, key, sentence, mark) {
+    if (!marksOf(key)) return R.fillSentence(lesson, sentence, null, mark);
+    var out = el('span');
+    var offset = 0;
+    String(sentence || '').split('___').forEach(function (part, i, parts) {
+      out.appendChild(slotText(lesson, key, part, mark, offset));
+      offset += RV.words(part).length;
+      if (i < parts.length - 1) out.appendChild(el('span', { class: 'blank' }, ' '));
+    });
+    return out;
   }
 
   /* ---------- Gemini: key and the automatic flow ---------- */
@@ -1411,6 +1658,7 @@
         $('resumeDraft').addEventListener('click', function () {
           state.maxStep = 3;
           acceptLesson(c.lesson, draft.request || null, draft.nikudVerified);
+          if (draft.second && Array.isArray(draft.second.marks)) { state.second = draft.second; renderSecond(); }
         });
       }
     }

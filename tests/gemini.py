@@ -59,16 +59,17 @@ def split_lesson(lesson_json):
     return json.dumps(story, ensure_ascii=False), json.dumps({"exercises": lesson["exercises"]}, ensure_ascii=False)
 
 def request_kind(body):
-    """write (the story) | exercises | review, from the responseSchema of the request."""
+    """write (the story) | exercises | review | nikud (second opinion), from the responseSchema of the request."""
     schema = body["generationConfig"]["responseSchema"]
     if schema["type"] == "ARRAY": return "review"
+    if "lines" in schema["properties"]: return "nikud"
     return "write" if "story" in schema["properties"] else "exercises"
 
 class MockApi:
     """Answers in order from queue[kind] (kind: models | write | exercises | review), else a default.
     'abort' = network error, 'hang' = never answers. With hold=True, generate requests wait until release()."""
     def __init__(self, lesson_json, review_json="[]"):
-        self.queue = {"models": [], "write": [], "exercises": [], "review": []}
+        self.queue = {"models": [], "write": [], "exercises": [], "review": [], "nikud": []}
         self.log = []
         self.hold = False
         self.held = []
@@ -90,6 +91,12 @@ class MockApi:
         self.answer(route, kind)
 
     def answer(self, route, kind):
+        if kind == "nikud" and not self.queue[kind]:
+            # Second opinion on the nikud: the lines sent, back as they are (tests/nikud_second.py checks the rest)
+            prompt = json.loads(route.request.post_data)["contents"][0]["parts"][0]["text"]
+            lines = json.loads(prompt.split("השורות:\n", 1)[1])
+            route.fulfill(status=200, body=sse_body(reply(json.dumps({"lines": lines}, ensure_ascii=False))[1]),
+                          headers=dict(CORS, **{"Content-Type": "text/event-stream"})); return
         r = self.queue[kind].pop(0) if self.queue[kind] else self.defaults[kind]
         if r == "abort":
             route.abort("internetdisconnected"); return
@@ -286,6 +293,10 @@ with sync_playwright() as p:
     page.wait_for_function("() => document.querySelector('#nikudMsgs').textContent.includes('הוחל על')", timeout=15000)
     wait_stage(page, "nikud", "done")
     check("השיעור מוכן" in flow_msgs(page), "nikud done through the bridge, 'השיעור מוכן'")
+    mock.release()  # the second opinion on the nikud is held like the other calls
+    page.wait_for_timeout(500)
+    check(mock.count("nikud") == 1 and any("[Gemini] nikud-check (" in c for c in console),
+          "after Dicta: the second opinion on the nikud is sent to Gemini (call 'nikud-check')")
     page.wait_for_timeout(600)
     d = page.evaluate("JSON.parse(localStorage.getItem('readingApp.draft'))")
     check((words[0] + "ים") in page.evaluate("(s) => Hebrew.stripNikud(s)", d["lesson"]["story"]), "approved suggestion applied before nikud")

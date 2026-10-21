@@ -12,6 +12,7 @@
   --good-soft: #e5f3e9;
   --warn: #b7791f;
   --warn-soft: #fdf3e1;
+  --orange: #e8590c;
   --bad: #b04a4a;
   --bad-soft: #fbeaea;
   --highlight: #fff0a3;
@@ -550,6 +551,27 @@ textarea.open-answer { display: block; max-width: 640px; margin: 0 auto; font-si
   border-radius: 4px;
   padding: 0 2px;
 }
+
+/* Teacher preview: Dicta and Gemini vocalized this word differently (second opinion) */
+.nikud-check,
+.story .word.nikud-check {
+  text-decoration: underline;
+  text-decoration-color: var(--orange);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: none;
+  cursor: pointer;
+}
+.nikud-check:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; border-radius: 4px; }
+.second-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.second-bar strong { margin-inline-end: auto; }
+.second-status { margin: 10px 0; }
+.nikud-dialog {
+  border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+  width: min(440px, calc(100vw - 32px)); background: #fff; color: inherit;
+}
+.nikud-dialog::backdrop { background: rgba(30, 30, 30, 0.35); }
+.nikud-dialog .nikud-input { font-size: 1.4rem; flex: 1; min-width: 0; }
 
 /* ---------- Check step (teacher) ---------- */
 .check-part { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; }

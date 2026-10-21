@@ -1,4 +1,5 @@
-/* Check step logic: AI text review (spelling/grammar) and nikud comparison with Dicta.
+/* Check step logic: AI text review (spelling/grammar), nikud comparison with Dicta, and the second opinion
+   on Dicta's nikud from Gemini.
    Pure functions, no DOM. Exposes window.Review. */
 (function () {
   'use strict';
@@ -84,6 +85,7 @@
       '- בשדה field כתוב את שם השדה מהרשימה, למשל "story" או "exercises[2].question".',
       '- שדה sentence של תרגיל איתור מידע הוא משפט מתוך הסיפור, והוא חייב להישאר זהה לו. אם אתה מתקן משפט כזה, הצע את אותו תיקון גם בשדה story, ולהפך.',
       '- בתשובה לדוגמה (sampleAnswer) בדוק שהיא נכונה לפי הסיפור, קצרה, ומתאימה לשאלה.',
+      '- בדוק שכל משפט הגיוני וברור מבחינת המשמעות. משפט לא הגיוני או מוזר (למשל "אנשים שמחים ועצובים בתוך ארבעה קירות ביתם"): הצע ניסוח ברור והגיוני, מסוג style, ובשדה reason הסבר מה לא הגיוני או מוזר בו.',
       '- בשדה original העתק את הקטע בדיוק כפי שהוא מופיע בטקסט.',
       '- בשדה fix כתוב את הקטע המתוקן, בלי ניקוד.',
       '- בשדה reason כתוב הסבר קצר בעברית.',
@@ -388,6 +390,109 @@
     return n;
   }
 
+  /* ---------- 3. Second opinion on the nikud (Gemini, automatic mode only) ---------- */
+
+  // The lines sent to Dicta (plainText), each with its words' places in the lesson: [{text, refs: [{key, index}]}].
+  // A slot's lines are split at its newlines (the story keeps its paragraphs), empty lines left out, as in plainText.
+  function nikudLines(lesson) {
+    var out = [];
+    slots(lesson, true).forEach(function (slot) {
+      var k = 0;
+      slot.get().split('\n').forEach(function (line) {
+        var ws = words(line);
+        var plain = H.stripNikud(line).trim();
+        if (plain && ws.length) {
+          out.push({ text: plain, refs: ws.map(function (w, j) { return { key: slot.key, index: k + j }; }) });
+        }
+        k += ws.length;
+      });
+    });
+    return out;
+  }
+
+  // Groups of lines for one call each, up to maxChars of text per group (a longer line is a group of its own).
+  function nikudChunks(lines, maxChars) {
+    var out = [];
+    var cur = null;
+    lines.forEach(function (l) {
+      if (!cur || (cur.chars && cur.chars + l.text.length > maxChars)) { cur = { lines: [], chars: 0 }; out.push(cur); }
+      cur.lines.push(l);
+      cur.chars += l.text.length;
+    });
+    return out.map(function (c) { return c.lines; });
+  }
+
+  function buildNikudPrompt(texts) {
+    return [
+      'אתה מנקד טקסט בעברית לילדים שלומדים לקרוא.',
+      'הוסף ניקוד מלא לכל מילה בכל אחת מהשורות שלמטה, לפי ההקשר, בכתיב מלא (כמו הנקדן של דיקטה בסגנון מודרני).',
+      '',
+      'הנחיות:',
+      '- הוסף רק סימני ניקוד. אל תשנה אף אות, אף סימן פיסוק, אף רווח ואף מילה. אל תוסיף ואל תמחק מילים.',
+      '- בלי טעמים ובלי מתג.',
+      '- החזר את השורות באותו סדר, שורה מנוקדת אחת לכל שורה שקיבלת: ' + texts.length + ' שורות בדיוק, בשדה lines.',
+      '',
+      'השורות:',
+      JSON.stringify(texts, null, 2)
+    ].join('\n');
+  }
+
+  // Marks that do not change how a young reader reads the word: cantillation, meteg, rafe;
+  // holam haser for vav = holam; qamats qatan = qamats (the same sign on the page).
+  var READING_IGNORE_RE = /[֑-ֽֿ֯]/g;
+
+  // A comparable key for the nikud of a word: per letter, its marks in a fixed order.
+  function readingKey(word) {
+    return H.graphemes(word).filter(function (c) { return /[\p{L}\p{N}]/u.test(c.charAt(0)); }).map(function (c) {
+      return c.slice(1).replace(/[^\p{M}]/gu, '').replace(READING_IGNORE_RE, '')
+        .replace(/ֺ/g, 'ֹ').replace(/ׇ/g, 'ָ').split('').sort().join('');
+    }).join('|');
+  }
+
+  // Do two vocalizations of the same letters read the same?
+  function sameReading(a, b) {
+    return readingKey(a) === readingKey(b);
+  }
+
+  // Compares the lesson's words (Dicta's nikud, as they are now) with Gemini's vocalized lines.
+  // sent: the lines sent (nikudLines); got: Gemini's lines, in the same order.
+  // Words whose letters differ at Gemini's (or that changed here meanwhile), Gemini words with no nikud,
+  // and words the child sees without nikud (partial mode) are not compared.
+  // Returns {marks: [{key, index, word, dicta, gemini}], compared, skippedLines}.
+  function compareSecond(lesson, sent, got) {
+    var byKey = {};
+    slots(lesson, true).forEach(function (s) { byKey[s.key] = words(s.get()); });
+    var targets = lesson.targetWords.map(function (t) { return t.word; });
+    var marks = [];
+    var compared = 0;
+    var skippedLines = 0;
+    sent.forEach(function (line, i) {
+      var theirs = words(String(got[i] == null ? '' : got[i]));
+      if (theirs.length !== line.refs.length) { skippedLines++; return; }
+      line.refs.forEach(function (ref, j) {
+        var ours = (byKey[ref.key] || [])[ref.index];
+        var gem = H.normalize(theirs[j]);
+        if (!ours || H.bare(ours) !== H.bare(gem) || !H.hasNikud(gem) || !H.hasNikud(ours)) return;
+        if (!H.hasNikud(H.displayText(ours, lesson.nikudMode, targets))) return;
+        compared++;
+        if (!sameReading(ours, gem)) marks.push({ key: ref.key, index: ref.index, word: ours, dicta: ours, gemini: gem });
+      });
+    });
+    return { marks: marks, compared: compared, skippedLines: skippedLines };
+  }
+
+  // The marks still on the word they were made for; a word edited since then loses its mark.
+  function liveMarks(lesson, marks) {
+    var byKey = {};
+    slots(lesson, true).forEach(function (s) { byKey[s.key] = words(s.get()); });
+    return marks.filter(function (m) { return (byKey[m.key] || [])[m.index] === m.word; });
+  }
+
+  // The slot with this key, or null.
+  function slotByKey(lesson, key) {
+    return slots(lesson, true).filter(function (s) { return s.key === key; })[0] || null;
+  }
+
   window.Review = {
     slots: slots,
     signature: signature,
@@ -401,6 +506,14 @@
     compareNikud: compareNikud,
     applyFills: applyFills,
     haserWords: haserWords,
-    setWord: setWord
+    setWord: setWord,
+    nikudLines: nikudLines,
+    nikudChunks: nikudChunks,
+    buildNikudPrompt: buildNikudPrompt,
+    sameReading: sameReading,
+    compareSecond: compareSecond,
+    liveMarks: liveMarks,
+    slotByKey: slotByKey,
+    words: words
   };
 })();

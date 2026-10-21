@@ -140,7 +140,7 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   (checking the key): 120 s (`config.timeout`).
 - **Console**: one line per request, `[Gemini] <call> (<model>): HTTP <status>, <seconds> s (first data after
   <seconds> s), <chars> chars, finish <reason>[, retry][ – <error and Google's message>]` (`console.info`,
-  `console.warn` on errors). Calls: `check-key`, `write-story`, `write-exercises`, `review-text` (`write-lesson`:
+  `console.warn` on errors). Calls: `check-key`, `write-story`, `write-exercises`, `review-text`, `nikud-check` (section 3.2; `write-lesson`:
   the whole lesson in one call, `Gemini.writeLesson`, not used by the flow). The key is never logged.
 - **Model and output**: `MODEL` is one constant at the top of `js/gemini.js`: `gemini-3.8-flash` (stable, has a free tier; checked in the official pricing and models pages,
   October 2026). Structured output: `generationConfig.responseMimeType = 'application/json'` and a
@@ -216,7 +216,9 @@ check that the text fits the lesson's level, and to report mismatches as `style`
    stands out. The texts are the lesson's slots (`Review.slots`), which include every text of the new types:
    `exercises[i].sampleAnswer`, a locate `sentence`, and a message's `visible.question` / `.options[j]` /
    `.sampleAnswer` (same for `hidden`). The prompt adds that a locate sentence must stay identical to the story
-   (a fix to one is suggested for both), and that sample answers must be right and short. The same slots are
+   (a fix to one is suggested for both), and that sample answers must be right and short. It also asks to check
+   that every sentence makes sense: a sentence that is illogical or odd in meaning (e.g. "אנשים שמחים ועצובים
+   בתוך ארבעה קירות ביתם") gets a clearer wording as a `style` suggestion, with the reason. The same slots are
    the text sent to Dicta, so the new texts get nikud like all the others. The AI returns JSON suggestions `{field, type: error|style, original, fix, reason}` (fix without
    nikud); the teacher approves or rejects each one. `original` is matched as whole words, ignoring nikud.
 2. **Nikud with Dicta**: **required** before a link when the nikud mode is full or partial; hidden (and skipped)
@@ -235,6 +237,39 @@ check that the text fits the lesson's level, and to report mismatches as `style`
    - The nikud step is tied to the text it was applied to. Any text change afterwards requires Dicta again
      before a link (the progress bar cannot skip it either). The state is kept in the saved draft; a loaded
      lesson file in which every word has nikud counts as vocalized.
+
+#### 3.2 Second opinion on the nikud (Gemini; automatic mode only)
+Only when a Gemini key is saved; with copy-paste (no key) nothing changes. It never blocks the lesson.
+- **When**: every time Dicta's nikud is applied (`compareNikud` succeeded, automatic or pasted by hand), in the
+  background. The teacher can approve suggestions, edit, view the preview or make a link meanwhile; the auto
+  flow's nikud stage is done as usual.
+- **Request**: the same lines that went to Dicta (`Review.nikudLines`: every slot, split at its newlines,
+  empty lines left out, without nikud), in order, as a JSON array in the prompt (`Review.buildNikudPrompt`):
+  full nikud only, in ktiv male, no change to any letter, punctuation, space or word, no cantillation or meteg,
+  exactly N lines back. Structured output `Gemini.NIKUD_SCHEMA` = `{lines: [string]}`; call
+  `Gemini.checkNikud`, console name `nikud-check`, the usual retries and fallback model. A long lesson is split
+  into calls of up to `Gemini.config.nikudChunkChars` (2500) characters (`Review.nikudChunks`, whole lines; a
+  longer line alone), sent one after another. A part whose answer does not have the same number of lines is
+  not compared (a console warning); if no part could be compared, it counts as a failure.
+- **Comparison** (`Review.compareSecond`), word by word with the lesson's words as they are when the answer
+  comes (Dicta's nikud, or the teacher's choice): not compared when the letters differ at Gemini's (or the word
+  changed here meanwhile), when Gemini's word has no nikud, or when the child sees the word without nikud
+  (partial mode: only target words count). Normalization (`Review.sameReading`): per letter, the set of marks,
+  ignoring cantillation, meteg and rafe, holam haser for vav = holam, qamats qatan = qamats.
+- **Display**: words that read differently get an orange underline (`.nikud-check`) everywhere in the preview
+  (title, target words, story, exercises, also fill sentences). Above the story: "X מילים לבדיקה" with
+  "הבאה ←" (scrolls to the next marked word and opens it) and "סמן הכול כבדוק". Clicking a marked word (or
+  Enter) opens a small window (`<dialog id="nikudCheckDialog">`): the word in context, Dicta's version
+  (selected by default), Gemini's version, and manual editing (nikud only: the letters must stay the same, or
+  a message). A choice replaces the word (`Review.setWord`), keeps the Dicta check valid (only nikud changed),
+  and removes the mark. Until the teacher chooses, Dicta's nikud stays. Step 5 shows the same count with
+  "לתצוגה המקדימה". While it runs: "בדיקה כפולה של הניקוד עם Gemini…"; no difference: "Gemini ניקד כמו דיקטה ✓";
+  all checked: "כל המילים נבדקו ✓".
+- **Failure**: a small message "הבדיקה הכפולה לא רצה" with "↻ נסה שוב" (and the reason); the lesson goes on.
+- **Edits**: a mark stays only while its word is unchanged (`Review.liveMarks`, by field and word index); an
+  edited word loses its mark for good. Dicta again starts a new second opinion; a new lesson drops it. The
+  marks are kept in the saved draft (`second`).
+- **Tests**: `tests/nikud_second.py`, against a mock API.
 
 #### 3.1 Automatic nikud: the Dicta bridge
 A Tampermonkey userscript, `userscripts/dicta-bridge.user.js`, runs on `https://nakdan.dicta.org.il/*` and

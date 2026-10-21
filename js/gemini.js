@@ -21,7 +21,8 @@
     firstDataTimeout: 120000,      // a streamed answer: nothing at all yet for this long (the model may think first)
     idleTimeout: 45000,            // a streamed answer that has started: no new data for this long
     retryDelay: 4000,              // before the one automatic retry after another temporary error
-    busyDelays: [2000, 5000, 10000] // server overloaded (503): up to 3 more tries, waiting this long before each
+    busyDelays: [2000, 5000, 10000], // server overloaded (503): up to 3 more tries, waiting this long before each
+    nikudChunkChars: 2500            // second opinion on the nikud: text per call; a longer lesson is sent in several calls
   };
 
   // The model in use: MODEL, until it stays overloaded; then FALLBACK_MODEL until resetModel().
@@ -121,6 +122,13 @@
       required: ['field', 'type', 'original', 'fix', 'reason'],
       propertyOrdering: ['field', 'type', 'original', 'fix', 'reason']
     }
+  };
+
+  // Second opinion on Dicta's nikud: the same lines back, vocalized (Review.buildNikudPrompt).
+  var NIKUD_SCHEMA = {
+    type: 'OBJECT',
+    properties: { lines: LIST },
+    required: ['lines']
   };
 
   /* ---------- Errors ---------- */
@@ -393,6 +401,7 @@
     STORY_SCHEMA: STORY_SCHEMA,
     EXERCISES_SCHEMA: EXERCISES_SCHEMA,
     REVIEW_SCHEMA: REVIEW_SCHEMA,
+    NIKUD_SCHEMA: NIKUD_SCHEMA,
     GeminiError: GeminiError,
     getKey: getKey,
     setKey: setKey,
@@ -402,6 +411,7 @@
     writeLesson: function (key, prompt, opts) { return generate(key, prompt, LESSON_SCHEMA, Object.assign({ call: 'write-lesson' }, opts)); },
     writeStory: function (key, prompt, opts) { return generate(key, prompt, STORY_SCHEMA, Object.assign({ call: 'write-story' }, opts)); },
     writeExercises: function (key, prompt, opts) { return generate(key, prompt, EXERCISES_SCHEMA, Object.assign({ call: 'write-exercises' }, opts)); },
-    reviewLesson: function (key, prompt, opts) { return generate(key, prompt, REVIEW_SCHEMA, Object.assign({ call: 'review-text' }, opts)); }
+    reviewLesson: function (key, prompt, opts) { return generate(key, prompt, REVIEW_SCHEMA, Object.assign({ call: 'review-text' }, opts)); },
+    checkNikud: function (key, prompt, opts) { return generate(key, prompt, NIKUD_SCHEMA, Object.assign({ call: 'nikud-check' }, opts)); }
   };
 })();

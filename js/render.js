@@ -62,9 +62,11 @@
   // and a <span class="word"> (target words also get class "target").
   // onWordTap(fullyVocalizedWord) makes every word tappable.
   // mark: flag unvocalized words (teacher preview).
-  function story(lesson, onWordTap, mark) {
+  // decorate(span, index): called for every word span, index = the word's index in the story (teacher preview).
+  function story(lesson, onWordTap, mark, decorate) {
     var targets = targetsOf(lesson);
     var frag = document.createDocumentFragment();
+    var index = 0;
     lesson.story.split(/\n+/).forEach(function (para) {
       if (!para.trim()) return;
       var p = el('p');
@@ -79,6 +81,8 @@
           span.classList.add('tappable');
           span.addEventListener('click', function () { onWordTap(u.word); });
         }
+        if (decorate) decorate(span, index);
+        index++;
         p.appendChild(el('span', { class: 'unit' }, u.lead || null, span, u.trail || null));
       });
       frag.appendChild(p);
