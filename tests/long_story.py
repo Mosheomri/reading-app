@@ -88,8 +88,8 @@ with sync_playwright() as p:
     page.fill("#length", "2000")
     page.click("#makePrompt")
     prompt = page.text_content("#promptText")
-    check(page.is_visible("#step2") and "סך הכול בערך 2000 מילים" in prompt, "2000 words: accepted, the prompt asks for 2000 (%s)" %
-          [l for l in prompt.split("\n") if "אורך הסיפור" in l][0])
+    check(page.is_visible("#step2") and "אורך: בערך 2000 מילים" in prompt, "2000 words: accepted, the prompt asks for 2000 (%s)" %
+          [l for l in prompt.split("\n") if l.startswith("אורך:")][0])
 
     # ---------- Dicta: a 2000-word lesson, split into parts ----------
     lesson = long_lesson(2060, "sentences")  # the site counts words a little differently from split()

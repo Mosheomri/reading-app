@@ -59,23 +59,26 @@ def split_lesson(lesson_json):
     return json.dumps(story, ensure_ascii=False), json.dumps({"exercises": lesson["exercises"]}, ensure_ascii=False)
 
 def request_kind(body):
-    """write (the story) | exercises | review | nikud (second opinion), from the responseSchema of the request."""
+    """write (the story) | edit (the editor's rewrite) | exercises | review | nikud (second opinion), from the responseSchema."""
     schema = body["generationConfig"]["responseSchema"]
     if schema["type"] == "ARRAY": return "review"
     if "lines" in schema["properties"]: return "nikud"
-    return "write" if "story" in schema["properties"] else "exercises"
+    if "story" in schema["properties"]: return "write" if "title" in schema["properties"] else "edit"
+    return "exercises"
 
 class MockApi:
-    """Answers in order from queue[kind] (kind: models | write | exercises | review), else a default.
+    """Answers in order from queue[kind] (kind: models | write | edit | exercises | review), else a default
+    (edit: the story as it was).
     'abort' = network error, 'hang' = never answers. With hold=True, generate requests wait until release()."""
     def __init__(self, lesson_json, review_json="[]"):
-        self.queue = {"models": [], "write": [], "exercises": [], "review": [], "nikud": []}
+        self.queue = {"models": [], "write": [], "edit": [], "exercises": [], "review": [], "nikud": []}
         self.log = []
         self.hold = False
         self.held = []
         self.hung = []
         story_json, exercises_json = split_lesson(lesson_json)
         self.defaults = {"models": (200, {"name": "models/x"}), "write": reply(story_json), "exercises": reply(exercises_json),
+                         "edit": reply(json.dumps({"story": json.loads(story_json)["story"]}, ensure_ascii=False)),
                          "review": reply(review_json)}
 
     def handle(self, route):
@@ -224,15 +227,16 @@ with sync_playwright() as p:
     page.wait_for_function("() => document.querySelector('#autoStages li.active')")
     check(page.is_visible("#autoFlow") and stage_of(page, "write")[1] == "active" and "כותב סיפור" in stage_of(page, "write")[2]
           and page.is_disabled("#autoCreate"), "progress: 'כותב סיפור…' while writing, button disabled")
-    check([s[0] for s in stages(page)] == ["write", "exercises", "check", "review", "approve", "nikud"], "stages: story and exercises are separate")
+    check([s[0] for s in stages(page)] == ["write", "edit", "exercises", "check", "review", "approve", "nikud"],
+          "stages: story, edit and exercises are separate")
     page.wait_for_timeout(200)
     check(mock.count("write") == 1 and mock.count("exercises") == 0, "the exercises wait for the story")
     w = [x for x in mock.log if x["kind"] == "write"][-1]
     gc = w["body"]["generationConfig"]
     check(w["url"] == API + "v1beta/models/" + MODEL + ":streamGenerateContent?alt=sse" and w["headers"].get("x-goog-api-key") == KEY,
           "story: POST models/%s:streamGenerateContent?alt=sse (streamed) with the key header" % MODEL)
-    check(gc.get("thinkingConfig") == {"thinkingLevel": "low", "includeThoughts": True},
-          "story: thinkingLevel = low (the lowest for this model), includeThoughts so thought summaries stream")
+    check(gc.get("thinkingConfig") == {"thinkingLevel": "medium", "includeThoughts": True},
+          "story: thinkingLevel = medium (quality of the text), includeThoughts so thought summaries stream")
     check(gc["responseMimeType"] == "application/json" and gc["responseSchema"]["type"] == "OBJECT"
           and set(gc["responseSchema"]["required"]) == {"title", "topic", "targetWords", "story"} and "exercises" not in gc["responseSchema"]["properties"],
           "story: structured output with the small story schema (no exercises)")
@@ -241,6 +245,18 @@ with sync_playwright() as p:
     common = pasted.split("תרגילים (בסדר הזה):")[0]
     check(story_prompt.startswith(common) and "תרגילים" not in story_prompt[len(common):] and '"story"' in story_prompt,
           "story prompt: the story part of the copy-paste prompt, then the story structure only")
+    mock.release()
+    wait_stage(page, "edit", "active")
+    page.wait_for_timeout(200)
+    check(mock.count("edit") == 1 and mock.count("exercises") == 0 and "עורך את הסיפור" in stage_of(page, "edit")[2],
+          "progress: 'עורך את הסיפור…' after the story, the exercises wait for the edit")
+    e = [x for x in mock.log if x["kind"] == "edit"][-1]
+    egc = e["body"]["generationConfig"]
+    ep = e["body"]["contents"][0]["parts"][0]["text"]
+    check(egc["thinkingConfig"] == {"thinkingLevel": "medium", "includeThoughts": True} and set(egc["responseSchema"]["required"]) == {"story"},
+          "edit: thinkingLevel = medium, schema {story}")
+    check(ep.startswith("אתה עורך ספרי ילדים מנוסה.") and plain["story"] in ep and all(t["word"] in ep for t in plain["targetWords"]),
+          "edit prompt: the editor's role, the draft and the target words to keep")
     mock.release()
     wait_stage(page, "exercises", "active")
     page.wait_for_timeout(200)
@@ -525,9 +541,11 @@ with sync_playwright() as p:
     wait_stage(page, "review", "done")
     fb = [x for x in mock.log if x["model"] == FALLBACK]
     check(mock.count("write", MODEL) == 4 and mock.count("write", FALLBACK) == 1, "503 four times on %s: switched to %s" % (MODEL, FALLBACK))
-    check(fb and fb[0]["body"]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "minimal", "includeThoughts": True}
-          and fb[0]["body"]["generationConfig"]["responseSchema"]["type"] == "OBJECT", "fallback: same structured output, its own lowest thinking level (minimal)")
-    check(mock.count("exercises", FALLBACK) == 1 and mock.count("exercises", MODEL) == 0 and mock.count("review", FALLBACK) == 1
+    check(fb and fb[0]["body"]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low", "includeThoughts": True}
+          and fb[0]["body"]["generationConfig"]["responseSchema"]["type"] == "OBJECT", "fallback: same structured output, one thinking level lower (medium → low)")
+    xfb = [x for x in fb if x["kind"] == "exercises"]
+    check(xfb and xfb[0]["body"]["generationConfig"]["thinkingConfig"]["thinkingLevel"] == "minimal", "fallback exercises: low → minimal")
+    check(mock.count("edit", FALLBACK) == 1 and mock.count("exercises", FALLBACK) == 1 and mock.count("exercises", MODEL) == 0 and mock.count("review", FALLBACK) == 1
           and mock.count("review", MODEL) == 0, "the exercises and the review continue with the fallback model")
     texts = page.evaluate("__stageTexts")
     check(any("ממשיכים עם מודל קל יותר (%s)" % FALLBACK in t for t in texts) and "במודל הגיבוי" in stage_of(page, "write")[2],

@@ -132,6 +132,69 @@
     return { text: cleaned, removed: true };
   }
 
+  /* ---------- Letters of another script inside a Hebrew word ---------- */
+
+  var HEBREW_LETTER_RE = /[א-תיִ-ﭏ]/;
+  var NOT_HEBREW_LETTER_RE = /(?![֐-׿יִ-ﭏ])\p{L}/gu;
+  var SCRIPTS = [
+    ['ערבית', /[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]/],
+    ['יוונית', /[Ͱ-Ͽἀ-῿]/],
+    ['קירילית', /[Ѐ-ӿ]/],
+    ['לטינית', /[A-Za-zÀ-ɏ]/]
+  ];
+  // Arabic letters an AI sometimes slips into a Hebrew word, and the Hebrew letter each one stands for
+  // (the same letter of the alphabet: ة and ه are ה, ل is ל...). Fixed automatically; any other letter is an error.
+  var LOOKALIKE = {
+    'ة': 'ה', 'ه': 'ה', 'ا': 'א', 'ب': 'ב', 'ج': 'ג', 'د': 'ד', 'و': 'ו',
+    'ز': 'ז', 'ح': 'ח', 'ط': 'ט', 'ي': 'י', 'ى': 'י', 'ك': 'כ', 'ل': 'ל',
+    'م': 'מ', 'ن': 'נ', 'س': 'ס', 'ع': 'ע', 'ف': 'פ', 'ص': 'צ', 'ق': 'ק',
+    'ر': 'ר', 'ش': 'ש', 'ت': 'ת'
+  };
+
+  function scriptName(ch) {
+    for (var i = 0; i < SCRIPTS.length; i++) if (SCRIPTS[i][1].test(ch)) return SCRIPTS[i][0];
+    return 'מערכת כתב אחרת';
+  }
+
+  // The words of a text that have Hebrew letters and letters of another script: [{word, letters: [..]}].
+  function mixedWords(text) {
+    var out = [];
+    H.tokenize(text).forEach(function (seg) {
+      if (!seg.isWord || !HEBREW_LETTER_RE.test(seg.text)) return;
+      var letters = seg.text.match(NOT_HEBREW_LETTER_RE);
+      if (letters) out.push({ word: seg.text, letters: letters });
+    });
+    return out;
+  }
+
+  // Replaces the known lookalike letters inside Hebrew words. Returns {text, fixed: ['ة → ה', ...]}.
+  function fixMixedLetters(text) {
+    var fixed = [];
+    var out = H.tokenize(text).map(function (seg) {
+      if (!seg.isWord || !HEBREW_LETTER_RE.test(seg.text)) return seg.text;
+      return seg.text.replace(NOT_HEBREW_LETTER_RE, function (ch) {
+        if (!LOOKALIKE[ch]) return ch;
+        fixed.push(ch + ' → ' + LOOKALIKE[ch]);
+        return LOOKALIKE[ch];
+      });
+    }).join('');
+    return { text: fixed.length ? out : text, fixed: fixed };
+  }
+
+  // Every text of the lesson as [owner, key] (owner[key] is the string): title, target words, story, exercises.
+  var NOT_TEXT = { type: 1, answer: 1, emoji: 1, nikudMode: 1, level: 1, genre: 1, version: 1, unknown: 1 };
+  function textRefs(lesson) {
+    var out = [];
+    (function walk(o) {
+      Object.keys(o).forEach(function (k) {
+        if (NOT_TEXT[k]) return;
+        if (typeof o[k] === 'string') out.push([o, k]);
+        else if (o[k] && typeof o[k] === 'object') walk(o[k]);
+      });
+    })(lesson);
+    return out;
+  }
+
   // Returns {lesson, fatal: [messages], notes: [messages]}. A lesson is returned whenever
   // it can be previewed/edited; fatal lists problems that make that impossible;
   // notes lists automatic fixes that were applied.
@@ -158,6 +221,8 @@
       nikudMode: NIKUD_MODES.indexOf(raw.nikudMode) !== -1 ? raw.nikudMode : 'full',
       // Reading level id from js/levels.js; '' for lessons made before levels (the child page has no list).
       level: window.Levels ? window.Levels.valid(raw.level) : str(raw.level),
+      // 'story' or 'info' (an informational text); lessons made before this are stories.
+      genre: raw.genre === 'info' ? 'info' : 'story',
       targetWords: raw.targetWords.map(function (t) {
         if (typeof t === 'string') return { word: str(t), emoji: '' };
         t = t || {};
@@ -166,6 +231,15 @@
       story: cleanStory.text.replace(/\r\n?/g, '\n').trim(),
       exercises: raw.exercises.map(coerceExercise)
     };
+    var fixed = [];
+    textRefs(lesson).forEach(function (ref) {
+      var f = fixMixedLetters(ref[0][ref[1]]);
+      if (f.fixed.length) { ref[0][ref[1]] = f.text; fixed = fixed.concat(f.fixed); }
+    });
+    if (fixed.length) {
+      notes.push('תוקנו אותיות ממערכת כתב אחרת בתוך מילים עבריות (' + fixed.length + '): ' +
+        fixed.filter(function (f, i) { return fixed.indexOf(f) === i; }).join(', ') + '.');
+    }
     return { lesson: lesson, fatal: [], notes: notes };
   }
 
@@ -220,6 +294,42 @@
       });
     });
     return out;
+  }
+
+  /* ---------- Lines instead of paragraphs ---------- */
+
+  var LINES_WARNING = 'הטקסט מחולק לשורות במקום לפסקאות: ברוב הפסקאות יש משפט אחד בלבד.';
+
+  function paragraphsOf(story) {
+    return String(story || '').split(/\n+/).map(function (p) { return p.trim(); }).filter(function (p) { return bareWords(p).length; });
+  }
+
+  // Most paragraphs (of 3 or more) are a single sentence: the AI broke the line after every sentence.
+  function lineBroken(story) {
+    var paras = paragraphsOf(story);
+    if (paras.length < 3) return false;
+    return paras.filter(function (p) { return sentencesOf(p).length === 1; }).length > paras.length / 2;
+  }
+
+  // Joins runs of one-sentence lines into paragraphs of about 4 sentences; longer paragraphs stay as they are.
+  function joinParagraphs(story) {
+    var out = [];
+    var run = [];
+    function flush() {
+      var groups = Math.max(1, Math.round(run.length / 4));
+      for (var k = 0; k < groups; k++) {
+        var part = run.slice(Math.round(k * run.length / groups), Math.round((k + 1) * run.length / groups));
+        if (part.length) out.push(part.join(' '));
+      }
+      run = [];
+    }
+    paragraphsOf(story).forEach(function (p) {
+      if (sentencesOf(p).length === 1) { run.push(p); return; }
+      flush();
+      out.push(p);
+    });
+    flush();
+    return out.join('\n');
   }
 
   // Sort each order exercise by where its sentences appear in the story.
@@ -281,6 +391,9 @@
     return out;
   }
 
+  // The story may be this much shorter or longer than asked (as the prompt says) without a warning.
+  var LENGTH_SLACK = 0.2;
+
   // request (optional): {length: number, wordsMode: 'number'|'list', wordCount: n, words: [..]}
   // Returns {errors, warnings, wordCount, missingWords}. Nikud is not checked here:
   // it is added with Dicta in the check step.
@@ -294,12 +407,21 @@
 
     var wordCount = H.countWords(lesson.story);
     if (request && request.length) {
-      var min = Math.round(request.length * 0.85);
-      var max = Math.round(request.length * 1.15);
+      var min = Math.round(request.length * (1 - LENGTH_SLACK));
+      var max = Math.round(request.length * (1 + LENGTH_SLACK));
       if (wordCount < min || wordCount > max) {
         warnings.push('אורך הסיפור ' + wordCount + ' מילים (התבקשו בערך ' + request.length + ').');
       }
     }
+
+    if (lineBroken(lesson.story)) warnings.push(LINES_WARNING);
+
+    var mixed = [];
+    textRefs(lesson).forEach(function (ref) { mixed = mixed.concat(mixedWords(ref[0][ref[1]])); });
+    mixed.forEach(function (m) {
+      errors.push('המילה "' + m.word + '" כוללת ' + (m.letters.length === 1 ? 'אות' : 'אותיות') + ' ב' + scriptName(m.letters[0]) +
+        ' (' + m.letters.join(' ') + '). כתבו אותה מחדש באותיות עבריות.');
+    });
 
     var n = lesson.targetWords.length;
     if (n < 2 || n > 10) errors.push('צריך בין 2 ל-10 מילות יעד (יש ' + n + ').');
@@ -405,16 +527,20 @@
   /* ---------- Link encode / decode ---------- */
 
   function clean(lesson) {
-    return {
+    var out = {
       version: 1,
       title: lesson.title,
       topic: lesson.topic,
       nikudMode: lesson.nikudMode,
-      level: lesson.level || '',
-      targetWords: lesson.targetWords.map(function (t) { return { word: t.word, emoji: t.emoji }; }),
-      story: lesson.story,
-      exercises: lesson.exercises.filter(function (ex) { return !ex.unknown; })
+      level: lesson.level || ''
     };
+    // Only an informational text says so: a story (the default) stays exactly as before, so links and the
+    // print sheet's shuffle (seeded with this JSON) do not change.
+    if (lesson.genre === 'info') out.genre = 'info';
+    out.targetWords = lesson.targetWords.map(function (t) { return { word: t.word, emoji: t.emoji }; });
+    out.story = lesson.story;
+    out.exercises = lesson.exercises.filter(function (ex) { return !ex.unknown; });
+    return out;
   }
 
   function encode(lesson) {
@@ -446,6 +572,11 @@
     bareWords: bareWords,
     findSentence: findSentence,
     sentencesOf: sentencesOf,
+    LINES_WARNING: LINES_WARNING,
+    lineBroken: lineBroken,
+    joinParagraphs: joinParagraphs,
+    mixedWords: mixedWords,
+    fixMixedLetters: fixMixedLetters,
     fixMessage: fixMessage,
     clean: clean,
     encode: encode,

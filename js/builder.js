@@ -109,6 +109,7 @@
       wordListText: $('wordList').value,
       nikud: document.querySelector('input[name="nikud"]:checked').value,
       level: document.querySelector('input[name="level"]:checked').value,
+      genre: currentGenre(),
       exercises: readExerciseCounts()
     };
   }
@@ -121,7 +122,7 @@
         inputmode: 'numeric', 'data-count': t.id, 'aria-label': 'כמה שאלות: ' + t.label });
       var box = el('input', { type: 'checkbox', 'data-type': t.id });
       box.addEventListener('change', function () {
-        if (box.checked && !(+count.value > 0)) count.value = window.Levels.exerciseDefaults(currentLevel())[t.id] || 1;
+        if (box.checked && !(+count.value > 0)) count.value = window.Levels.exerciseDefaults(currentLevel(), currentGenre())[t.id] || 1;
         if (!box.checked) count.value = 0;
       });
       count.addEventListener('input', function () { box.checked = +count.value > 0; });
@@ -133,6 +134,25 @@
   function currentLevel() {
     var lv = document.querySelector('input[name="level"]:checked');
     return lv ? lv.value : window.Levels.DEFAULT;
+  }
+
+  function currentGenre() {
+    var g = document.querySelector('input[name="genre"]:checked');
+    return window.Levels.genre(g && g.value);
+  }
+
+  // The default question counts for the level and kind of text chosen in the form.
+  function defaultCounts() {
+    return window.Levels.exerciseDefaults(currentLevel(), currentGenre());
+  }
+
+  // Radio buttons for the kinds of text (story / informational). Returns the label elements.
+  function genreRadios(name, checkedId, onChange) {
+    return window.Levels.GENRES.map(function (g) {
+      var radio = el('input', { type: 'radio', name: name, value: g.id, checked: g.id === checkedId });
+      if (onChange) radio.addEventListener('change', function () { onChange(g.id); });
+      return el('label', { class: 'choice' }, radio, ' ' + g.label);
+    });
   }
 
   function setExerciseCounts(counts) {
@@ -173,8 +193,10 @@
     if (nk) nk.checked = true;
     var lv = document.querySelector('input[name="level"][value="' + s.level + '"]');
     if (lv) lv.checked = true;
+    var gn = document.querySelector('input[name="genre"][value="' + window.Levels.genre(s.genre) + '"]');
+    if (gn) gn.checked = true;
     // Saved before question types could be chosen: the level's defaults.
-    setExerciseCounts(s.exercises || window.Levels.exerciseDefaults(currentLevel()));
+    setExerciseCounts(s.exercises || defaultCounts());
     syncWordsMode();
   }
 
@@ -212,8 +234,8 @@
 
     save(STORE_SETTINGS, f);
     state.settings = f;
-    state.request = { topic: f.topic, length: f.length, level: f.level, wordsMode: f.wordsMode, wordCount: f.wordCount, words: words,
-      exercises: f.exercises };
+    state.request = { topic: f.topic, length: f.length, level: f.level, genre: f.genre, wordsMode: f.wordsMode, wordCount: f.wordCount,
+      words: words, exercises: f.exercises };
     $('promptText').textContent = window.buildPrompt(state.request);
     return true;
   }
@@ -245,6 +267,7 @@
     if (state.settings) {
       lesson.nikudMode = state.settings.nikud;
       lesson.level = state.settings.level;
+      lesson.genre = window.Levels.genre(state.settings.genre);
       if (!lesson.topic) lesson.topic = state.settings.topic;
     }
     // Automatic fixes are shown as warnings but not sent back to the AI.
@@ -392,6 +415,9 @@
     root.appendChild(el('div', { class: 'field' },
       el('span', { class: 'label' }, 'רמת קריאה'),
       el('div', { class: 'choices' }, levelRadios('edLevel', lesson.level, function (id) { lesson.level = id; changed(); }))));
+    root.appendChild(el('div', { class: 'field' },
+      el('span', { class: 'label' }, 'סוג הטקסט'),
+      el('div', { class: 'choices' }, genreRadios('edGenre', lesson.genre, function (id) { lesson.genre = id; changed(); }))));
 
     // Target words
     var twBox = el('div', { class: 'field' }, el('span', { class: 'label' }, 'מילות יעד ואימוג׳י'));
@@ -602,7 +628,10 @@
 
     var msgs = U.clear($('checkMsgs'));
     if (res.errors.length) msgs.appendChild(msgBox('error', 'צריך לתקן לפני יצירת קישור:', res.errors));
-    if (res.warnings.length) msgs.appendChild(msgBox('warn', 'שימו לב:', res.warnings));
+    if (res.warnings.length) msgs.appendChild(msgBox('warn', 'שימו לב:', res.warnings.map(function (w) {
+      if (w !== L.LINES_WARNING) return w;
+      return el('span', null, w + ' ', el('button', { type: 'button', class: 'btn small', id: 'joinParagraphs', onclick: joinParagraphs }, 'אחד לפסקאות'));
+    })));
     var haser = haserBox();
     if (haser) msgs.appendChild(haser);
     if (!res.errors.length && !res.warnings.length && !haser) msgs.appendChild(msgBox('ok', 'הכל תקין ✓'));
@@ -631,6 +660,13 @@
       if (ex.unknown) return;
       p.appendChild(exercisePreview(lesson, ex, i, mark));
     });
+  }
+
+  // Joins the one-sentence lines of the story into paragraphs (the button on the "lines" warning).
+  function joinParagraphs() {
+    state.lesson.story = L.joinParagraphs(state.lesson.story);
+    changed(true);
+    toast('השורות אוחדו לפסקאות.');
   }
 
   function previewText(lesson, s, mark) {
@@ -1417,6 +1453,7 @@
   // Stage states: '' (not yet), active, done, fail, skip, wait (the teacher's turn).
   var STAGES = [
     { id: 'write', active: 'כותב סיפור…', done: 'הסיפור נכתב' },
+    { id: 'edit', active: 'עורך את הסיפור…', done: 'הסיפור נערך' },
     { id: 'exercises', active: 'כותב תרגילים…', done: 'התרגילים נכתבו' },
     { id: 'check', active: 'בודק את השיעור…', done: 'השיעור עבר את הבדיקות' },
     { id: 'review', active: 'בודק טקסט…', done: 'בדיקת הטקסט הסתיימה' },
@@ -1478,7 +1515,8 @@
     stage('write', 'active');
     var current = function () { return auto && run === autoRuns; };
 
-    // Two calls: the story first, then the exercises on it (a smaller answer each, so each comes faster).
+    // Three calls: a draft of the story, an editor's rewrite of it, then the exercises on the edited story
+    // (a smaller answer each, so each comes faster).
     G.writeStory(key, window.buildStoryPrompt(state.request), streamOpts('write', 'כותב סיפור…', current)).then(function (text) {
       if (!current()) return;
       var story = readJson(text);
@@ -1488,7 +1526,7 @@
       }
       auto.story = story;
       stage('write', 'done', auto.fallback ? 'הסיפור נכתב (במודל הגיבוי ' + G.currentModel() + ')' : '');
-      autoExercises(key, run);
+      autoEdit(key, run);
     }, function (e) {
       if (current()) writeFailed(e);
     });
@@ -1511,7 +1549,47 @@
       el('div', { class: 'row' }, actionBtn('↻ לנסות שוב', autoCreate, true))));
   }
 
-  // The second call: exercises on auto.story. If it fails, the story is kept and only this call can be tried again.
+  // The second call: an editor rewrites the draft. The edit replaces the draft only if every target word is still
+  // in it and its length changed by no more than the editor was allowed (with a little room); otherwise, or if
+  // the call fails, the flow goes on with the draft.
+  function autoEdit(key, run) {
+    var current = function () { return auto && run === autoRuns; };
+    var draft = auto.story;
+    stage('edit', 'active');
+    G.editStory(key, window.buildEditPrompt(state.request, draft), streamOpts('edit', 'עורך את הסיפור…', current)).then(function (text) {
+      if (!current()) return;
+      var edited = readJson(text);
+      var why = editProblem(draft, edited && edited.story);
+      if (why) {
+        console.warn('[Gemini] edit-story: the edit was not used (' + why + ').');
+        stage('edit', 'skip', 'העריכה לא נשמרה (' + why + '); ממשיכים עם הטיוטה');
+      } else {
+        auto.story = Object.assign({}, draft, { story: edited.story.trim() });
+        stage('edit', 'done');
+      }
+      autoExercises(key, run);
+    }, function (e) {
+      if (!current()) return;
+      stage('edit', 'skip', 'העריכה לא הצליחה (' + ((e && e.message) || 'שגיאה') + '); ממשיכים עם הטיוטה');
+      autoExercises(key, run);
+    });
+  }
+
+  // Why an edited story cannot replace the draft, or '' if it can.
+  var EDIT_LENGTH_LIMIT = 0.3; // the editor may change the length by 20%; a bit more is tolerated
+  function editProblem(draft, story) {
+    if (typeof story !== 'string' || !story.trim()) return 'תשובה ריקה';
+    var words = H.tokenize(story).filter(function (t) { return t.isWord; }).map(function (t) { return t.text; });
+    var lost = (draft.targetWords || []).map(function (t) { return t.word; }).filter(function (t) {
+      return t && !words.some(function (w) { return H.matchesWord(w, t); });
+    });
+    if (lost.length) return (lost.length === 1 ? 'נעלמה מילת היעד ' : 'נעלמו מילות היעד ') + lost.join(', ');
+    var before = H.countWords(draft.story);
+    if (Math.abs(words.length - before) > before * EDIT_LENGTH_LIMIT) return 'האורך השתנה מ-' + before + ' ל-' + words.length + ' מילים';
+    return '';
+  }
+
+  // The last call: exercises on auto.story. If it fails, the story is kept and only this call can be tried again.
   function autoExercises(key, run) {
     var current = function () { return auto && run === autoRuns; };
     var story = auto.story;
@@ -1743,12 +1821,14 @@
   /* ---------- Wire up ---------- */
 
   function init() {
-    // A new level brings its default question counts.
-    levelRadios('level', window.Levels.DEFAULT, function (id) { setExerciseCounts(window.Levels.exerciseDefaults(id)); })
+    // A new level or kind of text brings its default question counts.
+    levelRadios('level', window.Levels.DEFAULT, function () { setExerciseCounts(defaultCounts()); })
       .forEach(function (n) { $('levelChoices').appendChild(n); });
+    genreRadios('genre', window.Levels.DEFAULT_GENRE, function () { setExerciseCounts(defaultCounts()); })
+      .forEach(function (n) { $('genreChoices').appendChild(n); });
     exerciseRows().forEach(function (n) { $('exTypes').appendChild(n); });
-    setExerciseCounts(window.Levels.exerciseDefaults(window.Levels.DEFAULT));
-    $('exDefaults').addEventListener('click', function () { setExerciseCounts(window.Levels.exerciseDefaults(currentLevel())); });
+    setExerciseCounts(defaultCounts());
+    $('exDefaults').addEventListener('click', function () { setExerciseCounts(defaultCounts()); });
     fillForm(load(STORE_SETTINGS));
     document.querySelectorAll('input[name="wordsMode"]').forEach(function (r) { r.addEventListener('change', syncWordsMode); });
     $('settingsForm').addEventListener('submit', submitSettings);

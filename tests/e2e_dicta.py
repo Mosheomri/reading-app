@@ -49,7 +49,7 @@ with sync_playwright() as p:
     page.check("input[name=nikud][value=full]")
     page.click("button[type=submit]")
     prompt = page.text_content("#promptText")
-    check("אורך הסיפור: 3 פסקאות, בכל פסקה 3 משפטים, סך הכול בערך 55 מילים." in prompt, "prompt has total word count")
+    check("אורך: בערך 55 מילים." in prompt, "prompt has total word count")
     check(not page.evaluate("(p) => Hebrew.hasNikud(p)", prompt) and "בלי ניקוד בכלל" in prompt, "prompt asks for no nikud and has none")
     scripts = page.eval_on_selector_all("script[src^='js/'], link[href^='css/']", "els => els.map(e => e.getAttribute('src') || e.getAttribute('href'))")
     check(scripts and all("?v=" in s for s in scripts), "local scripts and css carry a ?v= version (cache busting)")

@@ -1,6 +1,7 @@
 /* The AI prompt template. Kept in one place so it is easy to tune.
    Exposes window.buildPrompt (the whole lesson, for copy-paste) and, for the automatic flow with Gemini,
-   window.buildStoryPrompt and window.buildExercisesPrompt (the same lesson in two calls). */
+   window.buildStoryPrompt, window.buildEditPrompt and window.buildExercisesPrompt (the same lesson in three calls:
+   a draft, an editor's rewrite of it, and the exercises). */
 (function () {
   'use strict';
 
@@ -73,70 +74,126 @@
     return lines;
   }
 
-  // AIs follow paragraph/sentence counts better than word counts.
-  // Words per sentence comes from the reading level (js/levels.js).
-  var SENTENCES_PER_PARAGRAPH = 4;
-
   function levelOf(id) {
     return window.Levels.get(id) || window.Levels.get(window.Levels.DEFAULT);
   }
 
-  // e.g. 128 words at level ג׳–ד׳ (8 words per sentence) → "4 פסקאות, בכל פסקה 4 משפטים, סך הכול בערך 128 מילים"
-  function storyShape(length, levelId) {
-    var sentences = Math.max(2, Math.round(length / levelOf(levelId).wordsPerSentence));
-    var paragraphs = Math.max(1, Math.round(sentences / SENTENCES_PER_PARAGRAPH));
-    var perParagraph = Math.max(1, Math.round(sentences / paragraphs));
-    var total = ', סך הכול בערך ' + length + ' מילים';
-    if (paragraphs === 1) return 'פסקה אחת, עם ' + perParagraph + ' משפטים' + total;
-    return paragraphs + ' פסקאות, בכל פסקה ' + perParagraph + ' משפטים' + total;
+  // How much the length may differ from what was asked (also the warning in Lesson.check and the editor's limit).
+  var LENGTH_SLACK = 0.2;
+
+  // e.g. 200 → "בערך 200 מילים. סטייה של עד 20% (בין 160 ל-240 מילים) מותרת."
+  function storyShape(length) {
+    return 'בערך ' + length + ' מילים. סטייה של עד ' + Math.round(LENGTH_SLACK * 100) + '% (בין ' +
+      Math.round(length * (1 - LENGTH_SLACK)) + ' ל-' + Math.round(length * (1 + LENGTH_SLACK)) + ' מילים) מותרת.';
   }
 
+  // The words for the kind of text, in the prompts.
+  function noun(genre) {
+    return window.Levels.genre(genre) === 'info'
+      ? { a: 'טקסט מידעי קצר', the: 'הטקסט', text: 'טקסט', kind: 'טקסט מידעי' }
+      : { a: 'סיפור קצר', the: 'הסיפור', text: 'סיפור', kind: 'סיפור' };
+  }
+
+  // Exercise lines speak of "the story"; for an informational text, "the text".
+  function forGenre(line, genre) {
+    return window.Levels.genre(genre) === 'info' ? line.replace(/סיפור/g, 'טקסט') : line;
+  }
+
+  var WRITER = 'אתה סופר ישראלי מנוסה לילדים, שכותב ספרים לקוראים מתחילים.';
+  var EDITOR = 'אתה עורך ספרי ילדים מנוסה.';
   var INTRO = 'אתה כותב תוכן ללימוד קריאה לילד בהוראה מותאמת.';
   // Rules for every text the AI writes (story and exercises).
   var NO_NIKUD = '- כתוב את כל הטקסט בלי ניקוד בכלל: הכותרת, הסיפור, המילים, השאלות והתשובות.';
   var KTIV = '- כתוב בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר).';
   var NO_EMOJI = '- אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד.';
+  var QUALITY = 'העיקרון: הטקסט צריך להיראות כאילו סופר מקצועי לילדים כתב אותו. כשיש התנגשות בין איכות לבין דרישה מספרית ' +
+    '(אורך, מספר הופעות של מילה), האיכות קובעת.';
+  var READ_ALOUD = 'לפני שאתה מחזיר את התשובה: קרא את הטקסט כאילו אתה מקריא אותו לילד, ותקן כל משפט שנשמע לא טבעי.';
 
-  function countsOf(settings, level) {
-    return settings.exercises || window.Levels.exerciseDefaults(level.id);
-  }
+  // The structure of each kind of text (writing and editing prompts).
+  var GENRE_LINES = {
+    story: [
+      '- דמות מרכזית עם שם, שיש לה רצון או בעיה.',
+      '- הדמות מנסה לפתור את הבעיה (ניסיון אחד או יותר), מגיעה לשיא, ובסוף יש פתרון.',
+      '- התחלה, אמצע וסוף ברורים.',
+      '- מקום וזמן עקביים לאורך כל הסיפור.',
+      '- כל משפט מקדם את העלילה.',
+      '- מותר ורצוי דיאלוג קצר.',
+      '- זה סיפור בלבד: בלי פסקאות של מידע והסברים כמו בטקסט מידעי.'
+    ],
+    info: [
+      '- נושא אחד.',
+      '- משפט פתיחה שמציג את הנושא.',
+      '- פסקה לכל תת-נושא.',
+      '- משפט סיכום בסוף.',
+      '- בלי עלילה ובלי דמויות בדיוניות.',
+      '- זה טקסט מידעי בלבד: לא סיפור, וגם לא סיפור שמשולב בו מידע.'
+    ]
+  };
 
-  // The story part of the prompt: topic, level, length, target words and the language rules.
-  function storyLines(settings, level) {
+  // Language, level and paragraph rules (writing and editing prompts).
+  function languageLines(level, genre) {
     var lines = [
-      INTRO,
-      '',
-      'כתוב סיפור קצר בעברית בנושא: ' + settings.topic,
-      'רמת קריאה: ' + level.label + '.',
-      'אורך הסיפור: ' + storyShape(settings.length, level.id) + '.'
-    ];
-    if (settings.wordsMode === 'list') {
-      lines.push('מילות היעד: ' + settings.words.join(', ') + '. כל מילת יעד חייבת להופיע בסיפור לפחות פעמיים.');
-    } else {
-      lines.push('בחר ' + settings.wordCount + ' מילות יעד פשוטות ומוחשיות שקשורות לנושא. כל מילה חייבת להופיע בסיפור לפחות פעמיים.');
-    }
-    lines.push(
-      '',
-      'הנחיות לסיפור:',
-      '- שפה של ילדים, מותאמת לרמת הקריאה.',
+      '- עברית טבעית, כמו בספרי ילדים ישראליים.',
+      '- אורך משפטים מגוון, מילות קישור (ו, אבל, כי, אז, פתאום, כש-, ש-) ופסיקים, כך שהטקסט זורם ולא נשמע כמו רשימה.',
+      '- בלי שפה ספרותית גבוהה, בלי ז׳רגון (של ספורט, מדע וכו׳), בלי צירופים שנשמעים כמו תרגום, ובלי משפטי מילוי שלא מקדמים את הטקסט.',
       '- ' + level.sentence
-    );
-    level.language.forEach(function (l) { lines.push('- ' + l); });
-    lines.push(NO_NIKUD, KTIV,
-      '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה. רק אימוג׳י נפוץ וותיק שמוצג בכל מכשיר (כמו 🐶 🌳 ⚽ 🏠 🍎): ' +
-        'בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.',
-      NO_EMOJI);
+    ];
+    window.Levels.textLines(level, genre).forEach(function (l) { lines.push('- ' + l); });
+    lines.push('- מה לא לכתוב ברמה הזו:');
+    level.avoid.forEach(function (l) { lines.push('  - ' + l); });
+    lines.push('- פסקאות: 3 עד 6 משפטים בכל פסקה. ירידת שורה רק בין פסקאות, לא אחרי כל משפט.');
     return lines;
   }
 
-  // settings: {topic, length, level, wordsMode: 'number'|'list', wordCount, words: [],
+  function countsOf(settings, level) {
+    return settings.exercises || window.Levels.exerciseDefaults(level.id, settings.genre);
+  }
+
+  // The story part of the prompt: role, kind of text, topic, level, length, target words and the language rules.
+  function storyLines(settings, level) {
+    var genre = window.Levels.genre(settings.genre);
+    var n = noun(genre);
+    var lines = [
+      WRITER,
+      'כתוב ' + n.a + ' בעברית לילד שלומד לקרוא, בהוראה מותאמת.',
+      QUALITY,
+      '',
+      'נושא: ' + settings.topic,
+      'סוג הטקסט: ' + n.kind + '.',
+      'רמת קריאה: ' + level.label + '.',
+      'אורך: ' + storyShape(settings.length),
+      '',
+      genre === 'info' ? 'מבנה הטקסט המידעי:' : 'מבנה הסיפור:'
+    ].concat(GENRE_LINES[genre], ['', 'מילות יעד:']);
+    if (settings.wordsMode === 'list') {
+      lines.push('- מילות היעד: ' + settings.words.join(', ') + '.');
+    } else {
+      lines.push('- בחר ' + settings.wordCount + ' מילות יעד פשוטות ומוחשיות, שמשתלבות ב' + n.text +
+        ' באופן טבעי (לדוגמה: בסיפור על כדורגל, החפץ הוא "כדור", לא "כדורגל").');
+    }
+    lines.push(
+      '- השתמש בכל מילה רק במשמעות הנכונה שלה, ובמקום שבו היא מתאימה באופן טבעי.',
+      '- כל מילה מופיעה לפחות פעם אחת, ועדיף 2 עד 3 פעמים, אם זה טבעי.',
+      '- אסור להמציא משפט או דמות רק כדי לשלב מילה.',
+      '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה. רק אימוג׳י נפוץ וותיק שמוצג בכל מכשיר (כמו 🐶 🌳 ⚽ 🏠 🍎): ' +
+        'בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.',
+      '',
+      'שפה:'
+    );
+    languageLines(level, genre).forEach(function (l) { lines.push(l); });
+    lines.push(NO_NIKUD, KTIV, NO_EMOJI, '', READ_ALOUD);
+    return lines;
+  }
+
+  // settings: {topic, length, level, genre: 'story'|'info', wordsMode: 'number'|'list', wordCount, words: [],
   //            exercises: {mcq: n, tf: n, ...} (optional: the level's defaults)}
   function buildPrompt(settings) {
     var level = levelOf(settings.level);
     var counts = countsOf(settings, level);
     var lines = storyLines(settings, level);
     lines.push('', 'תרגילים (בסדר הזה):');
-    exerciseLines(counts, level).forEach(function (l) { lines.push(l); });
+    exerciseLines(counts, level).forEach(function (l) { lines.push(forGenre(l, settings.genre)); });
     lines.push(
       '',
       'החזר את ה-JSON בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, בדיוק במבנה הזה' +
@@ -153,29 +210,76 @@
     return lines.join('\n');
   }
 
-  // Second call: the exercises on the story the first call wrote ({title, targetWords, story}).
+  // Second call of the automatic flow: an editor rewrites the draft ({title, targetWords, story}) for flow and
+  // natural language, keeping the plot, the target words, the kind of text and the level. Returns {story}.
+  function buildEditPrompt(settings, draft) {
+    var level = levelOf(settings.level);
+    var genre = window.Levels.genre(settings.genre);
+    var n = noun(genre);
+    var words = window.Hebrew.countWords(draft.story);
+    var targets = (draft.targetWords || []).map(function (w) { return w.word; });
+    var lines = [
+      EDITOR,
+      'לפניך טיוטה של ' + n.a + ' לילד שלומד לקרוא, ברמת קריאה ' + level.label + '.',
+      'שכתב אותה כך שתישמע כמו ספר ילדים טוב: רצף טבעי, מעברים חלקים בין המשפטים, ועברית שנשמעת טבעית כשמקריאים אותה בקול.',
+      '',
+      'מה לא משתנה:',
+      genre === 'info'
+        ? '- התוכן: אותו נושא, אותן עובדות ואותו סדר של תת-נושאים. אל תוסיף עובדות חדשות.'
+        : '- העלילה: אותן דמויות, אותם אירועים, באותו סדר ועם אותו סוף.',
+      '- מילות היעד: ' + targets.join(', ') + '. כל אחת נשארת בטקסט לפחות פעם אחת, באותו כתיב (מותר עם ו, ה, ב, ל, מ, ש לפניה), ובמשמעות הנכונה שלה.',
+      '- סוג הטקסט: ' + n.kind + '. אל תהפוך אותו ל' + (genre === 'info' ? 'סיפור' : 'טקסט מידעי') + ' ואל תערבב ביניהם.',
+      '- רמת הקריאה: ' + level.label + '.',
+      '- האורך: בטיוטה ' + words + ' מילים. מותר לשנות אותו עד 20% (בין ' + Math.round(words * (1 - LENGTH_SLACK)) +
+        ' ל-' + Math.round(words * (1 + LENGTH_SLACK)) + ' מילים).',
+      '',
+      'מה לשפר:',
+      '- רצף: חבר משפטים קצרים ונפרדים עם מילות קישור, וגוון את אורך המשפטים.',
+      '- משפטי מילוי שלא מקדמים את הטקסט: מחק אותם או מזג אותם עם משפט אחר.',
+      '- היגיון ועקביות: זמן, מקום, ומה שכל דמות יודעת ועושה.',
+      '- צירופים שנשמעים כמו תרגום, ז׳רגון ושפה גבוהה מדי לרמה: החלף בעברית פשוטה וטבעית.',
+      '- מילת יעד שמופיעה במקום מאולץ: נסח מחדש את המשפט כך שהיא תתאים בו באופן טבעי.',
+      '',
+      'הנחיות לרמה ולשפה:'
+    ];
+    languageLines(level, genre).forEach(function (l) { lines.push(l); });
+    lines.push(NO_NIKUD, KTIV, NO_EMOJI, '', READ_ALOUD, '',
+      'הכותרת: ' + draft.title,
+      '',
+      'הטיוטה:',
+      '---',
+      draft.story,
+      '---',
+      '',
+      'החזר JSON בדיוק במבנה הזה, עם הטקסט המלא אחרי העריכה (פסקאות מופרדות בשורה חדשה):',
+      JSON.stringify({ story: 'הטקסט המלא אחרי העריכה.' }, null, 2));
+    return lines.join('\n');
+  }
+
+  // Last call: the exercises on the (edited) story ({title, targetWords, story}).
   function buildExercisesPrompt(settings, story) {
     var level = levelOf(settings.level);
     var counts = countsOf(settings, level);
+    var g = function (l) { return forGenre(l, settings.genre); };
     var lines = [
       INTRO,
       '',
-      'זה סיפור לילד ברמת קריאה: ' + level.label + '.',
+      g('זה סיפור לילד ברמת קריאה: ') + level.label + '.',
       'הכותרת: ' + story.title,
       'מילות היעד: ' + (story.targetWords || []).map(function (w) { return w.word; }).join(', '),
       '',
-      'הסיפור:',
+      g('הסיפור:'),
       '---',
       story.story,
       '---',
       '',
-      'כתוב תרגילים על הסיפור הזה (בסדר הזה):'
+      g('כתוב תרגילים על הסיפור הזה (בסדר הזה):')
     ];
-    exerciseLines(counts, level).forEach(function (l) { lines.push(l); });
+    exerciseLines(counts, level).forEach(function (l) { lines.push(g(l)); });
     lines.push(
       '',
       'הנחיות לתרגילים:',
-      '- כל תרגיל מבוסס על מה שכתוב בסיפור. משפט שלוקחים מהסיפור מועתק מילה במילה.',
+      g('- כל תרגיל מבוסס על מה שכתוב בסיפור. משפט שלוקחים מהסיפור מועתק מילה במילה.'),
       '- שפה של ילדים, מותאמת לרמת הקריאה.',
       NO_NIKUD,
       KTIV,
@@ -189,6 +293,8 @@
 
   window.buildPrompt = buildPrompt;
   window.buildStoryPrompt = buildStoryPrompt;
+  window.buildEditPrompt = buildEditPrompt;
   window.buildExercisesPrompt = buildExercisesPrompt;
   window.storyShape = storyShape;
+  window.Prompt = { LENGTH_SLACK: LENGTH_SLACK, languageLines: languageLines, GENRE_LINES: GENRE_LINES };
 })();

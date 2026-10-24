@@ -39,7 +39,7 @@ Suggested structure:
 /js/exercises.js
 /js/praise.js       encouragement sentences, their sound (recording / voice / text), mute
 /js/reading.js      paced reading modes on the child's reading screen
-/js/levels.js       reading levels (prompt guidelines, words per sentence)
+/js/levels.js       reading levels (prompt guidelines, default question counts) and kinds of text
 /js/print.js        printable worksheet and answer page
 /js/hebrew.js       nikud helpers (strip, normalize, word matching)
 /js/lesson.js       schema validation, encode/decode link
@@ -72,6 +72,7 @@ Suggested structure:
 | Field | Type | Notes |
 |---|---|---|
 | Topic (נושא) | free text | required |
+| Kind of text (סוג הטקסט) | סיפור / טקסט מידעי | default סיפור; stored in the lesson (`genre`); changes the prompts and the default question types |
 | Reading level (רמת קריאה) | גן–תחילת א׳ / סוף א׳–ב׳ / ג׳–ד׳ / ה׳–ו׳ | default סוף א׳–ב׳; see below |
 | Story length (אורך) | number of words | e.g. 100; range 20–2000 (`MAX_STORY_WORDS` in `js/builder.js`) |
 | Target words (מילות יעד) | either a number (AI chooses) or a list typed by teacher | 2–10 words |
@@ -92,6 +93,10 @@ Suggested structure:
   | ג׳–ד׳ | 3 | 1 | 2 | 1 | 1 | 1 | 1 | open |
   | ה׳–ו׳ | 3 | 1 | 1 | 1 | 2 | 1 | 1 | open |
 
+- **Informational text** (`genre: 'info'`, `Levels.exerciseDefaults(level, genre)`): no sequence of events and no
+  hidden message, so `order` and `message` default to 0 and their counts go to `locate` (e.g. ג׳–ד׳: 3 mcq, 1 tf,
+  2 fill, 1 open, 3 locate). The teacher can still choose them. Changing the kind of text, like the level, applies
+  its defaults.
 - Saved with the other settings; settings saved before this field get the level's defaults.
 - The prompt lists only the chosen types with their counts, and its JSON example shows one exercise of each
   chosen type (the message example in the level's style). The "answer = option number" line only when some
@@ -100,16 +105,17 @@ Suggested structure:
 
 #### Reading levels – `js/levels.js`
 All level settings live in one file, so they are easy to tune. Each level has an id (stored in the lesson
-as `level`), a label, an average number of words per sentence (turns the requested length into paragraphs and
-sentences, section 6), prompt lines about sentence length, vocabulary and syntax, and a line about the kind of
-comprehension questions:
+as `level`), a label, and prompt lines used by the writing, editing and review prompts: `sentence` (sentence
+length), `language` (vocabulary and style, every kind of text), `story` (characters and dialogue, stories only),
+`avoid` (what not to write at this level), and `questions` (the kind of comprehension questions).
+`Levels.textLines(level, genre)` gives `language` plus, for a story, `story`.
 
-| Level | id | Words / sentence | Language | Questions |
-|---|---|---|---|---|
-| גן–תחילת א׳ | `k-1` | 4 (3–5) | everyday words, simple sentences, mostly present tense | only direct: the answer is written in the story |
-| סוף א׳–ב׳ | `1-2` | 5.5 (4–7) | joining with ו / כי, few descriptions | direct, plus one simple comprehension question |
-| ג׳–ד׳ | `3-4` | 8 (6–10) | simple complex sentences (ש, כאשר), wider vocabulary | one inference question |
-| ה׳–ו׳ | `5-6` | 11 (8–14) | longer sentences, connectives (אבל, לכן, למרות ש…), expressions | two inference questions |
+| Level | id | Sentences | Language | Avoid | Questions |
+|---|---|---|---|---|---|
+| גן–תחילת א׳ | `k-1` | 3–6 words, joined with ו / אז / כי | words from the young child's world; deliberate repetition of a phrase; one tense; 1–2 characters with short names, one-line dialogue | abstract words, multi-part sentences, jumps in time or place | only direct |
+| סוף א׳–ב׳ | `1-2` | 4–8 words, varied | familiar words; joined with ו, כי, אבל, אז, כש-; few descriptions; some repetition; clear dialogue | abstract or rare words, more than two clauses, jumps | direct + one simple comprehension question |
+| ג׳–ד׳ | `3-4` | 6–12 words, varied | wider vocabulary explained by context; ש, כש, כי, אבל, לכן; more description; dialogue that moves the plot | jargon, high literary language, an explicit moral | one inference question |
+| ה׳–ו׳ | `5-6` | 8–15 words, with short ones | rich vocabulary but a children's book; connectives; vivid description (show, don't tell); complex feelings | high or archaic language, jargon, an explicit moral | two inference questions |
 
 The settings form and the editor list the levels from this file. The chosen level is saved with the teacher's
 settings and in the lesson (`level`); the editor can change it. The review prompt (step 5) asks the second AI to
@@ -128,9 +134,10 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   The text of every chunk is joined (parts marked `thought` are left out); an `error` event inside the stream
   counts like an HTTP error. While it streams, the stage shows "כותב סיפור… (נכתבו כבר X תווים)"; before the
   first answer text, while only thought summaries come, "כותב סיפור: חושב…".
-- **Thinking**: `generationConfig.thinkingConfig.thinkingLevel = 'low'`, the lowest level of
-  `gemini-3.8-flash` (it has low / medium / high, default medium; ai.google.dev/gemini-api/docs/thinking),
-  for shorter answers. A constant (`THINKING_LEVEL`) next to `MODEL`. `includeThoughts: true` too: thought
+- **Thinking**: `generationConfig.thinkingConfig.thinkingLevel` per call (`Gemini.THINKING`, by console name):
+  **medium** for writing and editing the story (`write-story`, `edit-story`; also `write-lesson`), where the
+  quality of the text matters most; **low** (`THINKING_LEVEL`) for the exercises, the review and the nikud check
+  (`gemini-3.8-flash` has low / medium / high; ai.google.dev/gemini-api/docs/thinking). `includeThoughts: true` too: thought
   summaries stream while the model thinks, so the timer is reset and the teacher sees "חושב…" (they are not
   part of the answer). If the API rejects the setting (400 mentioning thinking), the request is sent once more
   without it.
@@ -140,34 +147,41 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   (checking the key): 120 s (`config.timeout`).
 - **Console**: one line per request, `[Gemini] <call> (<model>): HTTP <status>, <seconds> s (first data after
   <seconds> s), <chars> chars, finish <reason>[, retry][ – <error and Google's message>]` (`console.info`,
-  `console.warn` on errors). Calls: `check-key`, `write-story`, `write-exercises`, `review-text`, `nikud-check` (section 3.2; `write-lesson`:
+  `console.warn` on errors). Calls: `check-key`, `write-story`, `edit-story`, `write-exercises`, `review-text`, `nikud-check` (section 3.2; `write-lesson`:
   the whole lesson in one call, `Gemini.writeLesson`, not used by the flow). The key is never logged.
 - **Model and output**: `MODEL` is one constant at the top of `js/gemini.js`: `gemini-3.8-flash` (stable, has a free tier; checked in the official pricing and models pages,
   October 2026). Structured output: `generationConfig.responseMimeType = 'application/json'` and a
   `responseSchema` (OpenAPI subset): `STORY_SCHEMA` (title, topic, targetWords, story) and `EXERCISES_SCHEMA`
-  (`{exercises}`) are the two halves of the lesson schema, which mirrors the prompt's example (section 5), with
+  (`{exercises}`) are the two halves of the lesson schema, `EDIT_SCHEMA` is `{story}` (the editor's rewrite), which mirrors the prompt's example (section 5), with
   `answer` as a string for all exercise types ("0", "true"), which `Lesson.coerce` already accepts; the review
   schema is the list the review prompt asks for.
 - **Flow** after "✨ צור שיעור" (shown next to "יצירת פרומפט" once a key is saved), with a stage list on top of
   the page (⏳ active, ✓ done, ✕ failed, 👆 the teacher's turn, – skipped):
   1. **כותב סיפור…**: the story part of the copy-paste prompt (`buildStoryPrompt`: the same lines as
-     `buildPrompt` up to the exercises), with the small story schema. Two calls instead of one: each answer is
-     smaller, so it comes faster, and a failed exercises call does not lose the story.
-  2. **כותב תרגילים…**: `buildExercisesPrompt(settings, story)`: the story Gemini wrote, its title and target
+     `buildPrompt` up to the exercises), with the small story schema. Separate calls instead of one: each answer
+     is smaller, so it comes faster, and a failed exercises call does not lose the story.
+  2. **עורך את הסיפור…** (automatic mode only): `buildEditPrompt(settings, draft)`, with the role "עורך ספרי ילדים
+     מנוסה", rewrites the draft for flow and natural language without changing the plot (for an informational
+     text: the facts), the target words, the kind of text or the level; the length may change by up to 20%.
+     Answer `{story}` (`Gemini.editStory`, `edit-story`). **Guard**: the edit replaces the draft only if every
+     target word is still in it (`Hebrew.matchesWord`, prefixes allowed) and its word count is within 30% of the
+     draft's; otherwise the stage says "העריכה לא נשמרה (…); ממשיכים עם הטיוטה". A failed edit call never stops
+     the flow either ("העריכה לא הצליחה…"): the exercises are written on the draft.
+  3. **כותב תרגילים…**: `buildExercisesPrompt(settings, story)`: the (edited) story, its title and target
      words, the same exercise lines as the copy-paste prompt and the text rules. Story and exercises are joined
      into one lesson JSON, which goes into the step 3 box. If this call fails, the story is kept: "↻ לנסות שוב
      את התרגילים" sends only this call again ("שיעור חדש" starts over).
-  3. **בודק את השיעור…**: the same checks as a paste (`analyzeResponse`: extract, coerce, sort order exercises,
+  4. **בודק את השיעור…**: the same checks as a paste (`analyzeResponse`: extract, coerce, sort order exercises,
      `Lesson.check`). Errors stop the flow; warnings only go on (they show in the preview).
-  4. **בודק טקסט…**: a separate call with the existing review prompt (`Review.buildReviewPrompt`). The check
+  5. **בודק טקסט…**: a separate call with the existing review prompt (`Review.buildReviewPrompt`). The check
      step opens and the suggestions are shown for approval exactly as after a paste.
-  5. **מחכה לאישור ההצעות**: when the last suggestion is approved or rejected, the flow goes on. That last
+  6. **מחכה לאישור ההצעות**: when the last suggestion is approved or rejected, the flow goes on. That last
      decision is a click, so Dicta may open in a new window then (popups need a user gesture).
-  6. **מנקד בדיקטה…**: if the Dicta bridge answered before in this browser (`readingApp.dictaBridge`, set on its
+  7. **מנקד בדיקטה…**: if the Dicta bridge answered before in this browser (`readingApp.dictaBridge`, set on its
      "ready", cleared when it does not answer), automatic nikud starts. Otherwise (or with no suggestions, when
      there is no click to open a window from) it is the teacher's turn: the auto-nikud button is highlighted and
      the manual steps are there. No nikud mode: skipped.
-  7. "השיעור מוכן ✓" with a button to the link.
+  8. "השיעור מוכן ✓" with a button to the link.
 - **Errors** (clear Hebrew message, the copy-paste flow with the prompt ready in step 2, and "↻ לנסות שוב"):
   invalid key (400 `API_KEY_INVALID`, 401, 403), quota (429), no network, no data for 120 s / 45 s, blocked
   (`promptFeedback.blockReason`, safety finish), cut (`MAX_TOKENS`), empty answer, a lesson that fails the checks
@@ -178,9 +192,9 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   or a bad key.
   **Fallback model**: if the main model is still overloaded after its tries, the call switches to
   `FALLBACK_MODEL` (a constant at the top of `js/gemini.js`: `gemini-3.5-flash-lite`, stable, free tier,
-  structured outputs and thinking; its lowest thinking level `minimal`, `FALLBACK_THINKING_LEVEL`), with the
-  same retries. The stage shows "ממשיכים עם מודל קל יותר (…)" and the story is marked as written with the
-  fallback. The rest of that run (the exercises, the review) stays on the fallback; the next "צור שיעור" starts with the main
+  structured outputs and thinking), one thinking level lower than the call asks (`FALLBACK_THINKING`: medium →
+  low, low → minimal), with the same retries. The stage shows "ממשיכים עם מודל קל יותר (…)" and the story is marked as written with the
+  fallback. The rest of that run (the edit, the exercises, the review) stays on the fallback; the next "צור שיעור" starts with the main
   model again (`Gemini.resetModel()`). Both models overloaded: "השרת של Google עמוס כרגע…" and copy-paste.
   **A review error** does not stop the flow: a clear message with **"↻ נסה ביקורת שוב"** at the top and in the
   review part (the manual review is offered too). Nikud is offered meanwhile, without scrolling away from the
@@ -188,7 +202,9 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   "ready for a link" is shown together with the failure and its button.
 - Leaving the flow (new lesson, loading a file, pasting a response, "יצירת פרומפט") cancels it; late answers
   from a cancelled run are ignored.
-- **Tests**: `tests/gemini.py`, against a mock API (Playwright routing). **Real timing**: `tests/gemini_bench.py`
+- **Tests**: `tests/gemini.py`, against a mock API (Playwright routing); the editor's call, its guard and the
+  thinking levels also in `tests/text_quality.py`, with the kind of text, the new prompts, the review's editing
+  checks, letters of another script and lines instead of paragraphs. **Real timing**: `tests/gemini_bench.py`
   (not in `run_all.py`; the key from the `GEMINI_API_KEY` environment variable only) writes lessons the way the
   flow does with both models and reports the time to the first data, the total time and the failures.
 
@@ -208,12 +224,22 @@ check that the text fits the lesson's level, and to report mismatches as `style`
 - The lesson usually has no nikud yet at this point (section 7). The preview says so as an info message
   (not a warning) when the nikud mode is full or partial. Words without nikud are marked in red only once
   the lesson has some nikud (e.g. a word added after Dicta).
+- **Lines instead of paragraphs** (`Lesson.lineBroken`): when the story has 3 or more paragraphs and most of
+  them are a single sentence, the warning "הטקסט מחולק לשורות במקום לפסקאות…" (also in step 3 and in the
+  automatic flow's notes). In the preview it has a button **"אחד לפסקאות"** (`Lesson.joinParagraphs`): runs of
+  one-sentence lines become paragraphs of about 4 sentences (10 lines → 3, 4, 3); longer paragraphs stay.
 - Non-blocking warning "ייתכן כתיב חסר": words with holam or qubuts on a letter other than ו, with no ו or א
   after it (exceptions: פה, כה, איפה, משה, also with prefixes). Works once the text has nikud.
 
 ### Step 5: Check and nikud
-1. **Text review (optional)**: a prompt for a second AI with all lesson texts **without nikud**, so ktiv haser
-   stands out. The texts are the lesson's slots (`Review.slots`), which include every text of the new types:
+1. **Text review (optional)**: a prompt for a second AI ("עורך לשון ועורך ספרי ילדים") with all lesson texts
+   **without nikud**, so ktiv haser stands out. Besides spelling, grammar and the level (the level's lines,
+   including what to avoid), it has **editing checks**, each finding a suggestion with a reason, `error` for a real
+   mistake and `style` for better wording: flow and connectives, filler sentences (suggest merging with the next or
+   previous sentence: original = both, fix = the merged wording), logic and consistency in the plot, time and
+   place (a contradiction is an error), jargon and high language, phrases that sound translated, target words in
+   a wrong sense (error) or forced in (style), and mixing kinds of text (a story inside an informational text or
+   the other way round). The lesson's kind of text and target words are named. A fix may be a sentence or two. The texts are the lesson's slots (`Review.slots`), which include every text of the new types:
    `exercises[i].sampleAnswer`, a locate `sentence`, and a message's `visible.question` / `.options[j]` /
    `.sampleAnswer` (same for `hidden`). The prompt adds that a locate sentence must stay identical to the story
    (a fix to one is suggested for both), and that sample answers must be right and short. It also asks to check
@@ -532,6 +558,9 @@ Rules:
 - With nikud mode full or partial, `story`, `title`, words, questions and options are **stored fully vocalized**
   (by Dicta, step 5). The display mode is applied at render time (section 7). With mode none they may be stored
   without nikud.
+- `genre`: `"story"` or `"info"` (an informational text). Missing or anything else (lessons made before it):
+  a story. `Lesson.clean` (links, JSON files, the print sheet's seed) writes it only for `"info"`, so a story's
+  data is exactly as before. The child page does not use it.
 - `order.sentences` is stored in the correct order; the player shuffles.
 - `open`: a question and a sample answer (`sampleAnswer`). There is no right or wrong.
 - `locate`: a question and the sentence of the story that answers it (`sentence`, matched without nikud and
@@ -550,7 +579,8 @@ Rules:
 - Old drafts (no `level`, a request without question counts) resume; no question-count warnings; a lesson
   vocalized before is still vocalized: `Review.signature` and the text sent to Dicta are unchanged for lessons
   without the new types (checked against the code before them).
-- Old settings without question counts get the level's defaults (no level: the default level).
+- Old settings without question counts get the level's defaults (no level: the default level). Old settings
+  and lessons without `genre` are stories.
 - An old lesson's print sheet shuffles exactly as before (a snapshot of the old code's order). Only the
   instructions' spelling changed: בַּסִּיפּוּר, הַמִּילָּה, קוֹדֶם (ktiv male).
 - The review prompt for an old lesson has two more guideline lines (locate sentences, sample answers);
@@ -558,7 +588,14 @@ Rules:
 
 ### Validation (teacher page, before creating link)
 - Valid JSON, all required fields, correct types, `answer` indices in range.
-- Story word count within ±15% of the requested length (show the actual count; warning, not blocking).
+- Story word count within ±20% of the requested length, as the prompt allows (show the actual count; warning,
+  not blocking).
+- **Letters of another script inside a Hebrew word** (Arabic, Greek, Cyrillic, Latin…), in any text of the
+  lesson: an **error** ("המילה "…" כוללת אות ביוונית (ω). כתבו אותה מחדש באותיות עבריות."). Arabic letters that
+  stand for the same Hebrew letter (ة / ه → ה, ل → ל, …: `LOOKALIKE` in `js/lesson.js`) are fixed automatically
+  when the answer is read (`Lesson.coerce`), with the note "תוקנו אותיות ממערכת כתב אחרת…". A word written
+  entirely in another script is not checked.
+- Lines instead of paragraphs: warning (step 4).
 - Every target word appears in the story at least once – compare after stripping nikud, and allow Hebrew prefixes (ו, ה, ב, כ, ל, מ, ש, and combinations like וה, שב).
 - Number of target words matches the request (warning).
 - `open`: question and sample answer required. `locate`: question required; the answer sentence must be found
@@ -572,41 +609,55 @@ Rules:
 
 ## 6. Prompt template (generated by the teacher page)
 
-Written in Hebrew. Placeholders in `{}`.
+Written in Hebrew, in `js/prompt.js` so it is easy to tune. The principle: the text should read as if a
+professional children's author wrote it; when quality conflicts with a number (length, how often a word appears),
+quality wins. The same story lines are used by the copy-paste prompt (`buildPrompt`) and by the automatic flow's
+first call (`buildStoryPrompt`). Placeholders in `{}`:
 
 ```
-אתה כותב תוכן ללימוד קריאה לילד בהוראה מותאמת.
+אתה סופר ישראלי מנוסה לילדים, שכותב ספרים לקוראים מתחילים.
+כתוב {סיפור קצר | טקסט מידעי קצר} בעברית לילד שלומד לקרוא, בהוראה מותאמת.
+העיקרון: … כשיש התנגשות בין איכות לבין דרישה מספרית (אורך, מספר הופעות של מילה), האיכות קובעת.
 
-כתוב סיפור קצר בעברית בנושא: {topic}
+נושא: {topic}
+סוג הטקסט: {סיפור | טקסט מידעי}.
 רמת קריאה: {level label}.
-אורך הסיפור: {P} פסקאות, בכל פסקה {S} משפטים, סך הכול בערך {length} מילים.
-{IF words given} מילות היעד: {words}. כל מילת יעד חייבת להופיע בסיפור לפחות פעמיים.
-{IF number given} בחר {n} מילות יעד פשוטות ומוחשיות שקשורות לנושא. כל מילה חייבת להופיע בסיפור לפחות פעמיים.
+אורך: בערך {length} מילים. סטייה של עד 20% (בין {0.8·length} ל-{1.2·length} מילים) מותרת.
 
-הנחיות לסיפור:
-- שפה של ילדים, מותאמת לרמת הקריאה.
-- {level sentence line}
-- {level language lines, one per line}
-- כתוב את כל הטקסט בלי ניקוד בכלל: הכותרת, הסיפור, המילים, השאלות והתשובות.
-- כתוב בכתיב מלא תקני, כמו בטקסט רגיל בלי ניקוד (למשל שישי ולא ששי, בוקר ולא בקר).
-- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה. רק אימוג׳י נפוץ וותיק שמוצג בכל מכשיר (כמו 🐶 🌳 ⚽ 🏠 🍎): בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.
-- אל תכניס אימוג׳י לסיפור, לכותרת או לתרגילים. אימוג׳י מופיעים רק בשדה emoji של מילות היעד.
+{מבנה הסיפור: a named main character with a wish or problem; attempts, climax, resolution; beginning, middle
+ and end; consistent place and time; every sentence moves the plot; short dialogue welcome; a story only
+| מבנה הטקסט המידעי: one topic; an opening sentence; a paragraph per subtopic; a closing sentence; no plot and
+ no fictional characters; informational only}
 
-תרגילים:
-- 3 שאלות הבנה אמריקאיות (3 אפשרויות כל אחת). {level questions line}
-- 2 משפטי נכון/לא נכון.
-- 2 משפטים להשלמת מילה חסרה (סמן את החסר ב-___), עם 3 אפשרויות.
-- תרגיל סידור אחד: 4 משפטים מהסיפור, בסדר הנכון.
-- בשדה answer: מספר האפשרות הנכונה, כשהאפשרות הראשונה היא 0.
+מילות יעד:
+- {the teacher's words | choose n simple, concrete words that fit the text naturally (e.g. in a story about
+  football the object is "כדור", not "כדורגל")}
+- only in their right meaning, where they fit naturally; at least once, preferably 2–3 times if natural;
+  never invent a sentence or character just to fit a word; one common emoji each.
 
-החזר את ה-JSON בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, בדיוק במבנה הזה:
-{schema example from section 5, without nikud and without nikudMode}
+שפה:
+- natural Hebrew of Israeli children's books; varied sentence length, connectives (ו, אבל, כי, אז, פתאום, כש-,
+  ש-) and commas; no high literary language, no jargon, no translated-sounding phrases, no filler sentences.
+- {level sentence line} {level language lines} {level story lines, stories only}
+- מה לא לכתוב ברמה הזו: {level avoid lines}
+- paragraphs of 3 to 6 sentences; a line break only between paragraphs.
+- no nikud; ktiv male; no emoji in the text.
+
+לפני שאתה מחזיר את התשובה: קרא את הטקסט כאילו אתה מקריא אותו לילד, ותקן כל משפט שנשמע לא טבעי.
+
+תרגילים (בסדר הזה): {the chosen types; for an informational text "הסיפור" → "הטקסט"}
+החזר את ה-JSON …: {schema example from section 5, without nikud and without nikudMode}
 ```
 
-- The length is given as paragraphs and sentences (the level's words per sentence, 4 sentences per paragraph),
-  because AIs follow those better than a word count, plus the total word count.
+- The length is asked for as "about N words" with the 20% range; the older paragraph × sentence count is gone.
+- **The editor's prompt** (automatic mode, `buildEditPrompt`): the role "אתה עורך ספרי ילדים מנוסה.", what does
+  not change (plot / facts, target words with their spelling, kind of text, level, length within 20% of the
+  draft's word count), what to improve (flow, filler, logic and consistency, translated phrases / jargon / high
+  language, a forced target word), the same language lines, the read-aloud line, the title and the draft; answer
+  `{story}`.
+- The exercises prompt (`buildExercisesPrompt`) keeps its role ("אתה כותב תוכן ללימוד קריאה…") and speaks of
+  "הטקסט" for an informational text.
 - The AI writes **without nikud**: its nikud is unreliable. Nikud comes from Dicta in step 5.
-- The template lives in `js/prompt.js` so it is easy to tune.
 
 ---
 

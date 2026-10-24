@@ -36,9 +36,9 @@ with sync_playwright() as p:
         return page.evaluate("JSON.parse(localStorage.getItem('readingApp.draft')).lesson")
 
     # ---------- levels.js ----------
-    levels = page.evaluate("Levels.LIST.map(l => [l.id, l.label, l.wordsPerSentence])")
+    levels = page.evaluate("Levels.LIST.map(l => [l.id, l.label])")
     check([tuple(l[:2]) for l in levels] == list(LABELS.items()), "four levels with their labels: %s" % [l[1] for l in levels])
-    check([l[2] for l in levels] == [4, 5.5, 8, 11] and page.evaluate("Levels.DEFAULT") == "1-2", "words per sentence 4 / 5.5 / 8 / 11, default סוף א׳–ב׳")
+    check(page.evaluate("Levels.DEFAULT") == "1-2", "default סוף א׳–ב׳")
     check(page.evaluate("[Levels.valid('3-4'), Levels.valid('x'), Levels.valid(undefined)]") == ["3-4", "", ""], "Levels.valid")
 
     # ---------- Settings field ----------
@@ -48,20 +48,20 @@ with sync_playwright() as p:
 
     page.fill("#topic", "כלב בגינה")
     page.fill("#length", "100")
-    sentences = {}
+
     for lid, label in LABELS.items():
         page.click("#step2 [data-go='1']") if page.is_visible("#step2") else None
         page.check("input[name=level][value='%s']" % lid)
         page.click("button[type=submit]")
         prompt = page.text_content("#promptText")
         lv = page.evaluate("(id) => Levels.get(id)", lid)
-        shape = page.evaluate("(id) => storyShape(100, id)", lid)
-        check("רמת קריאה: %s." % label in prompt and "- " + lv["sentence"] in prompt and all("- " + l in prompt for l in lv["language"]),
-              "prompt (%s): level name, sentence length and language lines" % label)
-        check(lv["questions"] in prompt and "אורך הסיפור: %s." % shape in prompt, "prompt (%s): question kinds and story shape: %s" % (label, shape))
-        sentences[lid] = page.evaluate("(id) => Math.round(100 / Levels.get(id).wordsPerSentence)", lid)
-    check(sentences["k-1"] > sentences["1-2"] > sentences["3-4"] > sentences["5-6"], "higher level → fewer, longer sentences: %s" % sentences)
-    check("משפטים קצרים" not in shape, "story shape no longer says 'short sentences' (the level sets the length)")
+        shape = page.evaluate("storyShape(100)")
+        check("רמת קריאה: %s." % label in prompt and "- " + lv["sentence"] in prompt and all("- " + l in prompt for l in lv["language"] + lv["story"]),
+              "prompt (%s): level name, sentence length, language and story lines" % label)
+        check(all("  - " + l in prompt for l in lv["avoid"]), "prompt (%s): what not to write at this level" % label)
+        check(lv["questions"] in prompt and "אורך: %s" % shape in prompt, "prompt (%s): question kinds and length: %s" % (label, shape))
+    check(page.evaluate("Levels.LIST.every(l => l.language.length >= 3 && l.avoid.length >= 3 && l.story.length >= 1)"),
+          "every level has language, story and avoid lines")
     check("שאלה אחת של הסקה" in page.evaluate("Levels.get('3-4').questions") and "שתי שאלות הסקה" in page.evaluate("Levels.get('5-6').questions"),
           "inference questions: one at ג׳–ד׳, two at ה׳–ו׳")
 

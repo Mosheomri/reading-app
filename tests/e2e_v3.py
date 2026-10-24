@@ -31,22 +31,20 @@ with sync_playwright() as p:
     page.evaluate("localStorage.clear()")
     page.reload()
 
-    # ---------- 3. Length as paragraphs/sentences ----------
-    # Level ג׳–ד׳: 8 words per sentence
-    shapes = page.evaluate("[20, 55, 100, 128, 200, 400].map(n => storyShape(n, '3-4'))")
-    for n, s in zip([20, 55, 100, 128, 200, 400], shapes): print("   ", n, "→", s)
-    check(shapes[3] == "4 פסקאות, בכל פסקה 4 משפטים, סך הכול בערך 128 מילים", "128 words → 4×4 + total")
-    check(shapes[0] == "פסקה אחת, עם 3 משפטים, סך הכול בערך 20 מילים", "20 words → one paragraph + total")
+    # ---------- 3. Length: about N words, 20% either way ----------
+    shapes = page.evaluate("[20, 128, 200].map(n => storyShape(n))")
+    for n, s in zip([20, 128, 200], shapes): print("   ", n, "→", s)
+    check(shapes[2] == "בערך 200 מילים. סטייה של עד 20% (בין 160 ל-240 מילים) מותרת.", "200 words → about 200, 160–240")
+    check(shapes[1] == "בערך 128 מילים. סטייה של עד 20% (בין 102 ל-154 מילים) מותרת.", "128 words → about 128, 102–154")
     page.fill("#topic", "כלב בגינה")
     page.fill("#length", "128")
     page.click("button[type=submit]")
     prompt = page.text_content("#promptText")
-    # Default level סוף א׳–ב׳: 5.5 words per sentence → 23 sentences → 6 paragraphs of 4
-    check("אורך הסיפור: 6 פסקאות, בכל פסקה 4 משפטים, סך הכול בערך 128 מילים." in prompt, "prompt uses paragraph/sentence shape + total words")
+    check("אורך: בערך 128 מילים." in prompt and "פסקאות, בכל פסקה" not in prompt, "prompt asks for about N words, not a paragraph/sentence count")
     page.click("#step2 [data-go='3']")
     page.fill("#response", json.dumps(sample, ensure_ascii=False))
     page.click("#parseBtn")
-    check("אורך הסיפור 55 מילים (התבקשו בערך 128)" in page.text_content("#parseMsgs"), "word-count warning kept")
+    check("אורך הסיפור 55 מילים (התבקשו בערך 128)" in page.text_content("#parseMsgs"), "word-count warning kept (more than 20% off)")
 
     # ---------- 1. Order exercise sorted by story position ----------
     lesson = copy.deepcopy(sample)

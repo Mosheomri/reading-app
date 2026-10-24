@@ -9,9 +9,13 @@
   // Used when MODEL stays overloaded (503) after its retries: a lighter stable model, also free tier,
   // with structured outputs (ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite).
   var FALLBACK_MODEL = 'gemini-3.5-flash-lite';
-  // Thinking makes answers slower; each model's lowest level (ai.google.dev/gemini-api/docs/thinking):
-  // gemini-3.8-flash has low / medium / high, gemini-3.5-flash-lite also minimal.
+  // Thinking makes answers slower but better (ai.google.dev/gemini-api/docs/thinking): gemini-3.8-flash has
+  // low / medium / high, gemini-3.5-flash-lite also minimal. Writing and editing the story: medium, since the
+  // quality of the text matters most there. Exercises, review and the nikud check: low.
+  var THINKING = { 'write-story': 'medium', 'edit-story': 'medium', 'write-lesson': 'medium' };
   var THINKING_LEVEL = 'low';
+  // The fallback model is used when the main one is overloaded: one level lower than asked, so it stays light.
+  var FALLBACK_THINKING = { medium: 'low', low: 'minimal' };
   var FALLBACK_THINKING_LEVEL = 'minimal';
   var API = 'https://generativelanguage.googleapis.com/v1beta/models/';
   var STORE_KEY = 'readingApp.geminiKey';
@@ -85,8 +89,8 @@
     }
   };
 
-  // The automatic flow writes a lesson in two calls: the story (small, fast), then the exercises on it
-  // (window.buildStoryPrompt / buildExercisesPrompt in js/prompt.js).
+  // The automatic flow writes a lesson in three calls: a draft of the story, an editor's rewrite of it (EDIT_SCHEMA),
+  // then the exercises on it (window.buildStoryPrompt / buildEditPrompt / buildExercisesPrompt in js/prompt.js).
   var STORY_SCHEMA = {
     type: 'OBJECT',
     properties: { title: S, topic: S, targetWords: TARGET_WORDS, story: STORY },
@@ -97,6 +101,13 @@
     type: 'OBJECT',
     properties: { exercises: EXERCISES },
     required: ['exercises']
+  };
+
+  // The editor's rewrite of the story (window.buildEditPrompt).
+  var EDIT_SCHEMA = {
+    type: 'OBJECT',
+    properties: { story: STORY },
+    required: ['story']
   };
 
   // The whole lesson in one call: the same shape as the example in js/prompt.js.
@@ -348,7 +359,8 @@
 
   // One model, with its retries.
   function generateWith(model, key, prompt, schema, opts) {
-    var level = model === FALLBACK_MODEL ? FALLBACK_THINKING_LEVEL : THINKING_LEVEL;
+    var asked = opts.thinking || THINKING[opts.call] || THINKING_LEVEL;
+    var level = model === FALLBACK_MODEL ? FALLBACK_THINKING[asked] || FALLBACK_THINKING_LEVEL : asked;
     var body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
@@ -375,7 +387,7 @@
   // Sends one prompt, streamed; resolves with the JSON text of the reply (matching `schema`).
   // If the model stays overloaded after its retries, switches to FALLBACK_MODEL and stays with it
   // (for the next calls too) until resetModel().
-  // opts: {call: name for the console, onRetry(err, info), onProgress(chars, {thinking}), onFallback(model)}
+  // opts: {call: name for the console (also picks the thinking level, THINKING), thinking: a level instead, onRetry(err, info), onProgress(chars, {thinking}), onFallback(model)}
   function generate(key, prompt, schema, opts) {
     opts = opts || {};
     var model = activeModel;
@@ -393,12 +405,14 @@
     MODEL: MODEL,
     FALLBACK_MODEL: FALLBACK_MODEL,
     THINKING_LEVEL: THINKING_LEVEL,
+    THINKING: THINKING,
     FALLBACK_THINKING_LEVEL: FALLBACK_THINKING_LEVEL,
     config: config,
     currentModel: function () { return activeModel; },
     resetModel: function () { activeModel = MODEL; },
     LESSON_SCHEMA: LESSON_SCHEMA,
     STORY_SCHEMA: STORY_SCHEMA,
+    EDIT_SCHEMA: EDIT_SCHEMA,
     EXERCISES_SCHEMA: EXERCISES_SCHEMA,
     REVIEW_SCHEMA: REVIEW_SCHEMA,
     NIKUD_SCHEMA: NIKUD_SCHEMA,
@@ -410,6 +424,7 @@
     generate: generate,
     writeLesson: function (key, prompt, opts) { return generate(key, prompt, LESSON_SCHEMA, Object.assign({ call: 'write-lesson' }, opts)); },
     writeStory: function (key, prompt, opts) { return generate(key, prompt, STORY_SCHEMA, Object.assign({ call: 'write-story' }, opts)); },
+    editStory: function (key, prompt, opts) { return generate(key, prompt, EDIT_SCHEMA, Object.assign({ call: 'edit-story' }, opts)); },
     writeExercises: function (key, prompt, opts) { return generate(key, prompt, EXERCISES_SCHEMA, Object.assign({ call: 'write-exercises' }, opts)); },
     reviewLesson: function (key, prompt, opts) { return generate(key, prompt, REVIEW_SCHEMA, Object.assign({ call: 'review-text' }, opts)); },
     checkNikud: function (key, prompt, opts) { return generate(key, prompt, NIKUD_SCHEMA, Object.assign({ call: 'nikud-check' }, opts)); }
