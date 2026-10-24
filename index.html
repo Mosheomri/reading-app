@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;600;700&display=swap">
-  <link rel="stylesheet" href="css/style.css?v=21">
+  <link rel="stylesheet" href="css/style.css?v=22">
 </head>
 <body>
   <div class="wrap" id="wrap">
@@ -269,6 +269,22 @@
         </div>
         <div class="msgs" id="nikudMsgs"></div>
         <div class="msgs" id="secondMsgs"></div>
+        <details class="second-manual" id="secondManual">
+          <summary class="small" style="cursor:pointer">🔁 בדיקה כפולה של הניקוד בכל צ׳אט (בלי מפתח)</summary>
+          <p class="small" style="margin:8px 0">בינה נוספת מנקדת את אותו טקסט, והמילים שהיא קוראת אחרת מדיקטה מסומנות בתצוגה המקדימה. מתאים כשאין מפתח של Gemini, כשנגמרה המכסה, או כשעובדים בהעתק-הדבק. עושים את זה אחרי הניקוד בדיקטה.</p>
+          <ol class="small check-steps">
+            <li><button type="button" class="btn small" id="copySecondPrompt">📋 העתק פרומפט לבדיקה כפולה</button></li>
+            <li>הדביקו אותו בצ׳אט של בינה (Gemini, ChatGPT ואחרים) ושלחו.</li>
+            <li>העתיקו את כל התשובה והדביקו כאן:</li>
+          </ol>
+          <div class="field">
+            <textarea id="secondResponse" rows="6" lang="he" class="code" placeholder="```&#10;השורות המנוקדות&#10;```"></textarea>
+          </div>
+          <div class="row" style="margin-bottom:8px">
+            <button type="button" class="btn" id="compareSecond">השוואה</button>
+          </div>
+          <div class="msgs" id="secondManualMsgs"></div>
+        </details>
         <div id="nikudList"></div>
       </div>
 
@@ -313,17 +329,17 @@
   <!-- Filled by the print button; only the print stylesheet shows it. -->
   <div id="printArea"></div>
 
-  <script src="js/lz-string.min.js?v=21"></script>
-  <script src="js/hebrew.js?v=21"></script>
-  <script src="js/util.js?v=21"></script>
-  <script src="js/lesson.js?v=21"></script>
-  <script src="js/render.js?v=21"></script>
-  <script src="js/levels.js?v=21"></script>
-  <script src="js/prompt.js?v=21"></script>
-  <script src="js/review.js?v=21"></script>
-  <script src="js/print.js?v=21"></script>
-  <script src="js/dicta.js?v=21"></script>
-  <script src="js/gemini.js?v=21"></script>
-  <script src="js/builder.js?v=21"></script>
+  <script src="js/lz-string.min.js?v=22"></script>
+  <script src="js/hebrew.js?v=22"></script>
+  <script src="js/util.js?v=22"></script>
+  <script src="js/lesson.js?v=22"></script>
+  <script src="js/render.js?v=22"></script>
+  <script src="js/levels.js?v=22"></script>
+  <script src="js/prompt.js?v=22"></script>
+  <script src="js/review.js?v=22"></script>
+  <script src="js/print.js?v=22"></script>
+  <script src="js/dicta.js?v=22"></script>
+  <script src="js/gemini.js?v=22"></script>
+  <script src="js/builder.js?v=22"></script>
 </body>
 </html>

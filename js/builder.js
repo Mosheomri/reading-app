@@ -43,7 +43,7 @@
     saveDraftTimer = setTimeout(function () {
       if (state.lesson) {
         save(STORE_DRAFT, { lesson: state.lesson, request: state.request, nikudVerified: state.nikudVerified, nikudOnce: state.nikudOnce, nikudLines: state.nikudLines,
-          second: state.second && state.second.status === 'done' ? { status: 'done', marks: state.second.marks } : null });
+          second: state.second && state.second.status === 'done' ? { status: 'done', marks: state.second.marks, source: state.second.source } : null });
       }
     }, 400);
   }
@@ -1122,13 +1122,15 @@
     return { node: node, pick: pick };
   }
 
-  /* 3. Second opinion on Dicta's nikud: Gemini vocalizes the same lines, words read differently are marked
-     in the preview for the teacher. Only with a Gemini key; runs in the background and never blocks the lesson. */
+  /* 3. Second opinion on Dicta's nikud: another AI vocalizes the same lines, words read differently are marked
+     in the preview for the teacher. Automatic with a Gemini key (in the background, never blocking the lesson),
+     or by hand in any chat (copy a prompt, paste the answer), always available. */
 
   var secondRuns = 0;
   var lastMark = null; // the mark opened last, for "הבאה"
 
-  // state.second: null, or {status: 'running' | 'done' | 'failed', message, marks: [{key, index, word, dicta, gemini, checked}]}
+  // state.second: null, or {status: 'running' | 'done' | 'failed', message, source: 'gemini' | 'manual',
+  //   marks: [{key, index, word, dicta, gemini (the other AI's word), checked}]}
   // only: some lines (Review.nikudLines entries) after a partial Dicta run; the marks on other lines stay.
   function startSecondOpinion(only) {
     var key = G.getKey();
@@ -1160,26 +1162,82 @@
     next().then(function () {
       if (!current()) return;
       if (!got.some(function (g) { return g != null; })) throw new Error('Gemini החזיר מספר שורות שונה מהטקסט ששלחנו.');
-      var r = RV.compareSecond(state.lesson, sent, got);
-      r.marks.forEach(function (m) { m.checked = false; });
-      var marks = r.marks;
-      var diffs = r.diffs;
-      if (before) {
-        var redone = {};
-        sent.forEach(function (l) { l.refs.forEach(function (ref) { redone[ref.key + '#' + ref.index] = true; }); });
-        var keep = function (m) { return !redone[m.key + '#' + m.index]; };
-        marks = RV.liveMarks(state.lesson, before.marks).filter(keep).concat(marks);
-        diffs = (before.diffs || []).filter(keep).concat(diffs);
-      }
-      state.second = { status: 'done', marks: marks, diffs: diffs, compared: r.compared + (before ? before.compared || 0 : 0) };
-      logSecond(state.second);
-      saveDraftSoon();
-      renderSecond();
+      finishSecond(sent, got, before, 'gemini');
     }).catch(function (e) {
       if (!current()) return;
-      state.second = { status: 'failed', message: (e && e.message) || '', marks: [] };
+      state.second = { status: 'failed', message: (e && e.message) || '', marks: [], source: 'gemini' };
       renderSecond();
+      // The manual way, right away: a chat needs no key and no quota.
+      $('secondManual').open = true;
     });
+  }
+
+  // Compares the lines sent with the other AI's lines and marks the words that read differently (both ways).
+  // before: the earlier result whose marks on other lines stay (a partial run), or null.
+  function finishSecond(sent, got, before, source) {
+    var r = RV.compareSecond(state.lesson, sent, got);
+    r.marks.forEach(function (m) { m.checked = false; });
+    var marks = r.marks;
+    var diffs = r.diffs;
+    if (before) {
+      var redone = {};
+      sent.forEach(function (l) { l.refs.forEach(function (ref) { redone[ref.key + '#' + ref.index] = true; }); });
+      var keep = function (m) { return !redone[m.key + '#' + m.index]; };
+      marks = RV.liveMarks(state.lesson, before.marks).filter(keep).concat(marks);
+      diffs = (before.diffs || []).filter(keep).concat(diffs);
+    }
+    state.second = { status: 'done', marks: marks, diffs: diffs, compared: r.compared + (before ? before.compared || 0 : 0), source: source };
+    logSecond(state.second);
+    saveDraftSoon();
+    renderSecond();
+  }
+
+  /* The manual way: the same lines (Review.nikudLines, as sent to Dicta) in a prompt for any chat. */
+
+  var manualLines = null; // the lines in the prompt copied last; the answer is compared with them
+
+  function copySecondPrompt() {
+    var msgs = U.clear($('secondManualMsgs'));
+    if (!state.lesson || !nikudDone()) {
+      msgs.appendChild(msgBox('warn', 'קודם נקדו את הטקסט בדיקטה (למעלה). הבדיקה הכפולה משווה לניקוד של דיקטה.'));
+      return;
+    }
+    manualLines = RV.nikudLines(state.lesson);
+    copy(RV.buildManualNikudPrompt(manualLines.map(function (l) { return l.text; })),
+      'הפרומפט הועתק (' + manualLines.length + ' שורות). הדביקו אותו בצ׳אט, ואת התשובה כאן.');
+  }
+
+  function compareSecondManual() {
+    var msgs = U.clear($('secondManualMsgs'));
+    if (!state.lesson || !nikudDone()) {
+      msgs.appendChild(msgBox('warn', 'קודם נקדו את הטקסט בדיקטה (למעלה). הבדיקה הכפולה משווה לניקוד של דיקטה.'));
+      return;
+    }
+    var got = RV.parseManualNikud($('secondResponse').value);
+    if (!got.length) { msgs.appendChild(msgBox('error', 'לא הודבקה תשובה.')); return; }
+    // The lines of the prompt copied last; after a reload (or if the text changed since), the lines as they are now.
+    var now = RV.nikudLines(state.lesson);
+    var sent = manualLines && manualLines.length === now.length && manualLines.every(function (l, i) { return l.text === now[i].text; }) ? manualLines : now;
+    var c = RV.checkManualNikud(sent, got);
+    if (c.error) {
+      msgs.appendChild(msgBox('error', c.error, c.details.concat(['ודאו שהעתקתם את כל התשובה, ושהטקסט לא השתנה מאז שהעתקתם את הפרומפט (אם השתנה, העתיקו אותו שוב).'])));
+      return;
+    }
+    if (c.bad.length === sent.length) {
+      msgs.appendChild(msgBox('error', 'האותיות בתשובה שונות מהטקסט ששלחנו בכל השורות.', c.details));
+      return;
+    }
+    var back = got.map(function (g, i) { return c.bad.indexOf(i) === -1 ? g : null; });
+    secondRuns++; // an automatic run still going would overwrite this result
+    finishSecond(sent, back, null, 'manual');
+    if (c.bad.length) {
+      msgs.appendChild(msgBox('warn', 'הבינה שינתה אותיות או מילים ב' + (c.bad.length === 1 ? 'שורה אחת' : '-' + c.bad.length + ' שורות') +
+        '; השורות האלה לא נבדקו.', c.details));
+    }
+  }
+
+  function secondName() {
+    return state.second && state.second.source === 'manual' ? 'הבינה' : 'Gemini';
   }
 
   // The differences by kind, for the console and the downloaded report: {kind: {count, reading, examples}}.
@@ -1268,9 +1326,15 @@
     if (s.status === 'failed') {
       return el('div', { class: 'msg warn small second-status' },
         el('div', { class: 'second-bar' },
-          el('strong', null, 'הבדיקה הכפולה לא רצה'),
+          el('strong', null, 'הבדיקה הכפולה האוטומטית לא רצה'),
           el('button', { type: 'button', class: 'btn small', onclick: function () { startSecondOpinion(); } }, '↻ נסה שוב')),
-        s.message ? el('div', { class: 'muted small' }, s.message) : null);
+        s.message ? el('div', { class: 'muted small' }, s.message) : null,
+        el('div', { class: 'small', style: 'margin-top:6px' }, 'אפשר לבדוק ידנית בכל צ׳אט, בלי מפתח ובלי מכסה: ',
+          el('button', { type: 'button', class: 'linkish small', onclick: function () {
+            if (state.step !== 5) showStep(5);
+            $('secondManual').open = true;
+            $('secondManual').scrollIntoView({ block: 'start', behavior: 'smooth' });
+          } }, 'לבדיקה הידנית')));
     }
     var n = pendingMarks().length;
     var report = s.diffs && s.diffs.length
@@ -1279,7 +1343,7 @@
     if (!n) {
       return el('div', { class: 'msg ok small second-status' }, s.marks.length
         ? 'הבדיקה הכפולה: כל המילים נבדקו ✓'
-        : 'הבדיקה הכפולה: Gemini ניקד כמו דיקטה ✓', report ? ' ' : null, report);
+        : 'הבדיקה הכפולה: ' + secondName() + ' ניקד' + (secondName() === 'הבינה' ? 'ה' : '') + ' כמו דיקטה ✓', report ? ' ' : null, report);
     }
     var count = n === 1 ? 'מילה אחת לבדיקה' : n + ' מילים לבדיקה';
     return el('div', { class: 'msg warn small second-status' },
@@ -1288,7 +1352,7 @@
         inPreview ? el('button', { type: 'button', class: 'btn small', onclick: nextMark }, 'הבאה ←') : null,
         inPreview ? el('button', { type: 'button', class: 'btn small quiet', onclick: markAllChecked }, 'סמן הכול כבדוק') : null,
         inPreview ? null : el('button', { type: 'button', class: 'btn small', onclick: function () { showStep(4); } }, 'לתצוגה המקדימה')),
-      el('div', { class: 'muted small' }, 'דיקטה ו-Gemini ניקדו אותן כך שהן נקראות אחרת. המילים מסומנות בקו כתום' +
+      el('div', { class: 'muted small' }, 'דיקטה ו' + (secondName() === 'Gemini' ? '-' : '') + secondName() + ' ניקדו אותן כך שהן נקראות אחרת. המילים מסומנות בקו כתום' +
         (inPreview ? '; לחצו על מילה כדי לבחור.' : ' בתצוגה המקדימה.') + ' עד שתבחרו, נשאר הניקוד של דיקטה. ', report));
   }
 
@@ -1314,7 +1378,7 @@
     span.setAttribute('data-mark', markId(m));
     span.setAttribute('role', 'button');
     span.setAttribute('tabindex', '0');
-    span.title = 'דיקטה ו-Gemini ניקדו את המילה הזו אחרת. לחצו כדי לבחור.';
+    span.title = 'דיקטה ו' + (secondName() === 'Gemini' ? '-' : '') + secondName() + ' ניקדו את המילה הזו אחרת. לחצו כדי לבחור.';
     span.addEventListener('click', function () { openMark(m); });
     span.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMark(m); }
@@ -1349,7 +1413,7 @@
       el('div', { class: 'nikud-context' },
         el('span', { class: 'muted small' }, slot.label + ': '),
         ws.slice(Math.max(0, m.index - 4), m.index).join(' ') + ' ', el('mark', null, m.word), ' ' + ws.slice(m.index + 1, m.index + 5).join(' ')),
-      el('div', { class: 'row' }, pick('דיקטה', m.dicta), pick('Gemini', m.gemini)),
+      el('div', { class: 'row' }, pick('דיקטה', m.dicta), pick(secondName(), m.gemini)),
       el('p', { class: 'small', style: 'margin:12px 0 4px' }, el('strong', null, 'או עריכה ידנית'), ' (רק הניקוד, האותיות נשארות):'),
       el('div', { class: 'row' }, input,
         el('button', { type: 'button', class: 'btn small primary', onclick: function () { choose(input.value); } }, 'שמירה')),
@@ -1863,6 +1927,8 @@
       copy(RV.plainText(state.lesson), 'הטקסט הועתק בלי ניקוד. עכשיו הדביקו אותו בנקדן של דיקטה.');
     });
     $('autoNikud').addEventListener('click', autoNikud);
+    $('copySecondPrompt').addEventListener('click', copySecondPrompt);
+    $('compareSecond').addEventListener('click', compareSecondManual);
     $('autoCreate').addEventListener('click', autoCreate);
     $('checkKey').addEventListener('click', checkKey);
     $('deleteKey').addEventListener('click', deleteKey);

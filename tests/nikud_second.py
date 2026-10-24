@@ -1,7 +1,7 @@
 """Second opinion on Dicta's nikud from Gemini (automatic mode), against a mock API (Playwright routing: nothing
 goes to the network). After Dicta: the same lines sent to Gemini (structured output, split into several calls for
 a long text), word-by-word comparison, orange marks in the preview, the choice window (Dicta / Gemini / manual),
-"הבאה" and "סמן הכול כבדוק", marks dropped on edited words, the failure message with "נסה שוב", nothing without a
+"הבאה" and "סמן הכול כבדוק", marks dropped on edited words, the failure message with "נסה שוב" and the manual way, nothing without a
 key, and the new line of the review prompt."""
 import json, sys, os, mimetypes
 from urllib.parse import urlparse, unquote
@@ -329,9 +329,11 @@ with sync_playwright() as p:
     page = open_teacher(ctx)
     to_dicta_wait(page)
     paste_dicta(page)
-    page.wait_for_function("() => document.querySelector('#secondMsgs').textContent.includes('הבדיקה הכפולה לא רצה')", timeout=15000)
+    page.wait_for_function("() => document.querySelector('#secondMsgs').textContent.includes('הבדיקה הכפולה האוטומטית לא רצה')", timeout=15000)
     check(mock.count("nikud") == 2 and stage_class(page, "nikud") == "done" and "השיעור מוכן" in page.text_content("#autoFlowMsgs"),
-          "Gemini failed (after one retry): 'הבדיקה הכפולה לא רצה', the lesson is ready as usual")
+          "Gemini failed (after one retry): 'הבדיקה הכפולה האוטומטית לא רצה', the lesson is ready as usual")
+    check("אפשר לבדוק ידנית בכל צ׳אט" in page.text_content("#secondMsgs") and page.evaluate("document.getElementById('secondManual').open"),
+          "the failure offers the manual way right away (tests/nikud_manual.py)")
     page.click("#secondMsgs button:has-text('נסה שוב')")
     page.wait_for_function("() => document.querySelector('#secondMsgs').textContent.includes('2 מילים לבדיקה')", timeout=10000)
     check(mock.count("nikud") == 3, "'נסה שוב' runs the check again")

@@ -442,19 +442,76 @@
     return out.map(function (c) { return c.lines; });
   }
 
+  var NIKUD_INTRO = [
+    'אתה מנקד טקסט בעברית לילדים שלומדים לקרוא.',
+    'הוסף ניקוד מלא לכל מילה בכל אחת מהשורות שלמטה, לפי ההקשר, בכתיב מלא (כמו הנקדן של דיקטה בסגנון מודרני).',
+    '',
+    'הנחיות:',
+    '- הוסף רק סימני ניקוד. אל תשנה אף אות, אף סימן פיסוק, אף רווח ואף מילה. אל תוסיף ואל תמחק מילים.',
+    '- בלי טעמים ובלי מתג.'
+  ];
+
+  // For Gemini (structured output): the lines as a JSON array, back in the field lines.
   function buildNikudPrompt(texts) {
-    return [
-      'אתה מנקד טקסט בעברית לילדים שלומדים לקרוא.',
-      'הוסף ניקוד מלא לכל מילה בכל אחת מהשורות שלמטה, לפי ההקשר, בכתיב מלא (כמו הנקדן של דיקטה בסגנון מודרני).',
-      '',
-      'הנחיות:',
-      '- הוסף רק סימני ניקוד. אל תשנה אף אות, אף סימן פיסוק, אף רווח ואף מילה. אל תוסיף ואל תמחק מילים.',
-      '- בלי טעמים ובלי מתג.',
+    return NIKUD_INTRO.concat([
       '- החזר את השורות באותו סדר, שורה מנוקדת אחת לכל שורה שקיבלת: ' + texts.length + ' שורות בדיוק, בשדה lines.',
       '',
       'השורות:',
       JSON.stringify(texts, null, 2)
-    ].join('\n');
+    ]).join('\n');
+  }
+
+  // For any chat (the manual second opinion): the lines in a code block, back the same way.
+  function buildManualNikudPrompt(texts) {
+    return NIKUD_INTRO.concat([
+      '- החזר את השורות באותו סדר: ' + texts.length + ' שורות בדיוק, שורה מנוקדת אחת לכל שורה שקיבלת, בלי מספור ובלי שורות ריקות.',
+      '- החזר את כל השורות בתוך בלוק קוד אחד (```), בלי שום טקסט לפניו או אחריו.',
+      '',
+      'השורות:',
+      '```',
+      texts.join('\n'),
+      '```'
+    ]).join('\n');
+  }
+
+  // The lines of a chat's answer to buildManualNikudPrompt: the first code block (or the whole text), one line per
+  // line, empty lines left out. A JSON array (or {lines: [...]}) is accepted too, and numbering on every line is dropped.
+  function parseManualNikud(text) {
+    var t = String(text || '').replace(/\r\n?/g, '\n');
+    var block = t.match(/```[^\n]*\n([\s\S]*?)```/);
+    var body = (block ? block[1] : t.replace(/```[^\n]*/g, '')).trim();
+    try {
+      var data = JSON.parse(body);
+      var arr = Array.isArray(data) ? data : data && Array.isArray(data.lines) ? data.lines : null;
+      if (arr && arr.every(function (x) { return typeof x === 'string'; })) return arr.map(function (x) { return H.normalize(x).trim(); });
+    } catch (e) { /* plain lines */ }
+    var lines = body.split('\n').map(function (l) { return H.normalize(l).trim(); }).filter(Boolean);
+    var numbered = /^\d+[.)]\s+/;
+    if (lines.length > 1 && lines.every(function (l) { return numbered.test(l); })) lines = lines.map(function (l) { return l.replace(numbered, ''); });
+    return lines;
+  }
+
+  function bareLine(text) {
+    return words(H.stripNikud(text)).map(H.bare).join(' ');
+  }
+
+  // Lines back from a chat against the lines sent ([{text}]): {error, details} when the number of lines differs,
+  // else {bad: [indices of lines whose letters or words differ]}. details: the first line that differs.
+  function checkManualNikud(sent, got) {
+    var first = -1;
+    for (var i = 0; i < Math.min(sent.length, got.length); i++) {
+      if (bareLine(sent[i].text) !== bareLine(got[i])) { first = i; break; }
+    }
+    var at = first === -1 ? Math.min(sent.length, got.length) : first;
+    var details = ['ההבדל הראשון בשורה ' + (at + 1) + ':',
+      'בטקסט ששלחנו: ' + (sent[at] ? sent[at].text : '(אין שורה כזו)'),
+      'בתשובה: ' + (got[at] != null ? H.stripNikud(got[at]) : '(אין שורה כזו)')];
+    if (got.length !== sent.length) {
+      return { error: 'מספר השורות לא תואם: שלחנו ' + sent.length + ' שורות, ובתשובה ' + got.length + '.', details: details };
+    }
+    var bad = [];
+    sent.forEach(function (l, j) { if (bareLine(l.text) !== bareLine(got[j])) bad.push(j); });
+    return { bad: bad, details: bad.length ? details : [] };
   }
 
   // How a reader says the word: one {c, v} per letter. c: the consonant ('' when the letter is silent: a ו or
@@ -687,6 +744,9 @@
     nikudLines: nikudLines,
     nikudChunks: nikudChunks,
     buildNikudPrompt: buildNikudPrompt,
+    buildManualNikudPrompt: buildManualNikudPrompt,
+    parseManualNikud: parseManualNikud,
+    checkManualNikud: checkManualNikud,
     sameReading: sameReading,
     compareSecond: compareSecond,
     liveMarks: liveMarks,

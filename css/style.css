@@ -568,6 +568,7 @@ textarea.open-answer { display: block; max-width: 640px; margin: 0 auto; font-si
 .second-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .second-bar strong { margin-inline-end: auto; }
 .second-status { margin: 10px 0; }
+.second-manual { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
 .nikud-dialog {
   border: 1px solid var(--line); border-radius: 14px; padding: 18px;
   width: min(440px, calc(100vw - 32px)); background: #fff; color: inherit;

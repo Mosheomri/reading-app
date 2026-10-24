@@ -280,8 +280,8 @@ check that the text fits the lesson's level, and to report mismatches as `style`
    - Words still without nikud after Dicta (full mode) are listed ("דיקטה לא ניקדה N מילים"); the button then
      sends only their lines.
 
-#### 3.2 Second opinion on the nikud (Gemini; automatic mode only)
-Only when a Gemini key is saved; with copy-paste (no key) nothing changes. It never blocks the lesson.
+#### 3.2 Second opinion on the nikud (Gemini automatically, or by hand in any chat)
+Automatic with a saved Gemini key; **by hand always** (below), also without a key. It never blocks the lesson.
 - **When**: every time Dicta's nikud is applied (`compareNikud` succeeded, automatic or pasted by hand), in the
   background. The teacher can approve suggestions, edit, view the preview or make a link meanwhile; the auto
   flow's nikud stage is done as usual.
@@ -315,12 +315,33 @@ Only when a Gemini key is saved; with copy-paste (no key) nothing changes. It ne
   and removes the mark. Until the teacher chooses, Dicta's nikud stays. Step 5 shows the same count with
   "לתצוגה המקדימה". While it runs: "בדיקה כפולה של הניקוד עם Gemini…"; no difference: "Gemini ניקד כמו דיקטה ✓";
   all checked: "כל המילים נבדקו ✓".
-- **Failure**: a small message "הבדיקה הכפולה לא רצה" with "↻ נסה שוב" (and the reason); the lesson goes on.
+- **Failure** (quota, network, …): "הבדיקה הכפולה האוטומטית לא רצה" with "↻ נסה שוב", the reason, and right
+  away the manual way: "אפשר לבדוק ידנית בכל צ׳אט, בלי מפתח ובלי מכסה" with a button "לבדיקה הידנית" (also in
+  the preview: it goes to step 5); the manual box opens by itself. The lesson goes on.
+- **By hand** (`<details id="secondManual">` under the nikud part of step 5, "בדיקה כפולה של הניקוד בכל צ׳אט
+  (בלי מפתח)"), for no key, no quota, or copy-paste work. After Dicta's nikud (before it: "קודם נקדו את הטקסט
+  בדיקטה"):
+  1. **"העתק פרומפט לבדיקה כפולה"**: `Review.buildManualNikudPrompt`, the same instructions as the automatic
+     prompt (full nikud only, ktiv male, no change to any letter, punctuation, space or word, no cantillation or
+     meteg) with the same lines that go to Dicta (`Review.nikudLines`, the same split), in a code block, and asks
+     for exactly N lines back in the same order, no numbering, inside one code block.
+  2. The answer is pasted in a box, then **"השוואה"**. `Review.parseManualNikud` takes the first code block (text
+     around it is ignored; no block: the whole text), one line per line, empty lines left out; a JSON array or
+     `{lines}` and numbering on every line are accepted too.
+  3. `Review.checkManualNikud`: a different number of lines is an error ("מספר השורות לא תואם: שלחנו N שורות,
+     ובתשובה M.") with the first line that differs (sent and received); letters or words different in every
+     line: an error with the first one; in some lines: those lines are left out with a warning naming the first,
+     and the rest is compared. Compared with the lines of the prompt copied last (or the lesson's lines now, after
+     a reload or a text change).
+  4. Then exactly as the automatic check (`finishSecond`: `Review.compareSecond`, orange marks, the count, the
+     choice window), with "הבינה" instead of "Gemini" (`state.second.source = 'manual'`, kept in the draft). A
+     manual result replaces an automatic one (still running or failed).
 - **Edits**: a mark stays only while its word is unchanged (`Review.liveMarks`, by field and word index); an
   edited word loses its mark for good. Dicta again starts a new second opinion (after a run on some lines
   only, only those lines, and the marks elsewhere stay); a new lesson drops it. The marks are kept in the saved
   draft (`second`).
-- **Tests**: `tests/nikud_second.py`, against a mock API; `tests/renikud.py` (only the changed lines, with
+- **Tests**: `tests/nikud_second.py`, against a mock API; `tests/nikud_manual.py` (the manual way, and the
+  manual way offered when the automatic check fails on quota); `tests/renikud.py` (only the changed lines, with
   the Dicta bridge mock); `tests/emoji.py`.
 
 #### 3.1 Automatic nikud: the Dicta bridge
