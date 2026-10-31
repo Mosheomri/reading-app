@@ -23,6 +23,7 @@
     nikudOnce: false,    // Dicta was applied to this lesson before: later, only the lines that need it go to Dicta
     nikudLines: null,    // the vocalized lines (Review.nikudLines().vocal) when Dicta's nikud was last valid
     second: null,        // second opinion on Dicta's nikud from Gemini (see startSecondOpinion)
+    plan: null,          // the AI's plan before the story ({idea, scenes}): shown in the preview, not kept in the lesson
     link: ''
   };
 
@@ -88,7 +89,7 @@
       li.className = s === n ? 'active' : (s <= state.maxStep ? 'done' : '');
       li.style.cursor = s <= state.maxStep && s !== n ? 'pointer' : '';
     });
-    if (n === 4) renderEditor();
+    if (n === 4) { renderEditor(); renderPlanView(); }
     if (n === 5) enterCheckStep();
     if (n === 6) renderLink();
     window.scrollTo(0, 0);
@@ -243,6 +244,7 @@
   /* ---------- Step 3: parse response ---------- */
 
   var pendingLesson = null;
+  var pendingPlan = null;
 
   // The checks on an AI response, pasted or from Gemini.
   // Returns {error, items, fix} when there is no lesson to edit, else {lesson, errors, warnings, problems}.
@@ -273,7 +275,8 @@
     // Automatic fixes are shown as warnings but not sent back to the AI.
     var notes = c.notes.concat(L.sortOrderExercises(lesson));
     var res = L.check(lesson, state.request);
-    return { lesson: lesson, errors: res.errors, warnings: notes.concat(res.warnings), problems: res.errors.concat(res.warnings) };
+    return { lesson: lesson, errors: res.errors, warnings: notes.concat(res.warnings), problems: res.errors.concat(res.warnings),
+      plan: L.coercePlan(ex.value.plan) };
   }
 
   function parseResponse() {
@@ -293,7 +296,7 @@
     var res = { errors: a.errors };
     var warnings = a.warnings;
     if (!res.errors.length && !warnings.length) {
-      acceptLesson(lesson, state.request);
+      acceptLesson(lesson, state.request, null, a.plan);
       return;
     }
     if (res.errors.length) msgs.appendChild(msgBox('error', 'צריך לתקן:', res.errors));
@@ -304,6 +307,7 @@
       showFix(L.fixMessage(problems));
     }
     pendingLesson = lesson;
+    pendingPlan = a.plan;
     $('continueAnyway').textContent = res.errors.length ? 'להמשיך לעריכה בכל זאת ←' : 'להמשיך לעריכה ←';
     $('continueAnyway').hidden = false;
   }
@@ -326,8 +330,10 @@
   }
 
   // nikudVerified: signature of text already vocalized with Dicta, or null.
-  function acceptLesson(lesson, request, nikudVerified) {
+  // plan: the AI's plan ({idea, scenes}, Lesson.coercePlan), shown in the preview only; null for none.
+  function acceptLesson(lesson, request, nikudVerified, plan) {
     state.lesson = lesson;
+    state.plan = plan || null;
     state.request = request;
     state.nikudVerified = nikudVerified || null;
     state.nikudOnce = !!nikudVerified;
@@ -337,6 +343,25 @@
     resetCheckStep();
     saveDraftSoon();
     showStep(4);
+  }
+
+  // The AI's plan (idea and scenes), folded above the preview. Not part of the lesson or the link.
+  function renderPlanView() {
+    var box = $('planView');
+    var plan = state.plan;
+    box.hidden = !plan;
+    var body = U.clear($('planViewBody'));
+    if (!plan) return;
+    var info = window.Levels.genre(state.lesson && state.lesson.genre) === 'info';
+    if (plan.idea) body.appendChild(el('p', null, el('strong', null, info ? 'הזווית: ' : 'הרעיון: '), plan.idea));
+    if (plan.scenes.length) body.appendChild(el('ol', null, plan.scenes.map(function (s) {
+      var notes = [];
+      if (s.feeling) notes.push('הרגש: ' + s.feeling);
+      if (s.facts) notes.push(s.facts);
+      if (s.words.length) notes.push('מילות יעד: ' + s.words.join(', '));
+      if (s.length) notes.push('בערך ' + s.length + ' מילים');
+      return el('li', null, s.what, notes.length ? el('span', { class: 'muted' }, ' (' + notes.join('. ') + ')') : null);
+    })));
   }
 
   /* ---------- Load / download JSON ---------- */
@@ -1516,6 +1541,10 @@
 
   // Stage states: '' (not yet), active, done, fail, skip, wait (the teacher's turn).
   var STAGES = [
+    { id: 'ideas', active: 'מחפש רעיונות…', done: 'הרעיונות מוכנים' },
+    { id: 'choose', active: 'בחרו רעיון', done: 'נבחר רעיון' },
+    { id: 'plan', active: 'מתכנן את המתווה…', done: 'המתווה מוכן' },
+    { id: 'approvePlan', active: 'בדקו את המתווה', done: 'המתווה אושר' },
     { id: 'write', active: 'כותב סיפור…', done: 'הסיפור נכתב' },
     { id: 'edit', active: 'עורך את הסיפור…', done: 'הסיפור נערך' },
     { id: 'exercises', active: 'כותב תרגילים…', done: 'התרגילים נכתבו' },
@@ -1526,7 +1555,9 @@
   ];
   var ICONS = { '': '○', active: '⏳', done: '✓', fail: '✕', skip: '–', wait: '👆' };
 
-  var auto = null; // {stages: {id: {state, note}}, waitingApproval, fallback, reviewError, story (kept to retry the exercises)}
+  // {stages: {id: {state, note}}, waitingApproval, fallback, reviewError, ideas (the cards shown), seen (titles of every idea
+  //  shown, not to repeat), idea (the chosen one, or {own}), plan ({title, idea, targetWords, scenes}), story (kept to retry the exercises)}
+  var auto = null;
   var autoRuns = 0;
 
   function renderStages() {
@@ -1546,11 +1577,23 @@
     renderStages();
   }
 
+  // This stage and the ones after it: not yet (no nikud mode: the nikud stays skipped).
+  function resetFrom(id) {
+    var after = false;
+    STAGES.forEach(function (st) {
+      if (st.id === id) after = true;
+      if (!after) return;
+      auto.stages[st.id] = st.id === 'nikud' && state.settings.nikud === 'none' ? { state: 'skip', note: 'בלי ניקוד' } : { state: '', note: '' };
+    });
+    renderStages();
+  }
+
   function cancelAuto() {
     if (!auto) return;
     autoRuns++;
     auto = null;
     $('autoFlow').hidden = true;
+    showPlanBox(null);
     $('autoCreate').disabled = false;
   }
 
@@ -1563,6 +1606,20 @@
     return el('button', { type: 'button', class: 'btn small' + (primary ? ' primary' : ''), onclick: onClick }, label);
   }
 
+  // The idea cards and the outline, in the flow's panel; null hides it.
+  function showPlanBox(content) {
+    var box = U.clear($('autoPlan'));
+    box.hidden = !content;
+    if (content) {
+      box.appendChild(content);
+      box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+  }
+
+  function isInfo() { return window.Levels.genre(state.request && state.request.genre) === 'info'; }
+
+  // Like an author: first 3 ideas, the teacher chooses one (or writes her own), then an outline she can edit, and only
+  // then the text: ideas → plan → writing → editing → exercises.
   function autoCreate() {
     cancelAuto();
     if (!readSettings()) return;
@@ -1570,50 +1627,255 @@
     if (!key) { syncGemini(); return; }
     var run = ++autoRuns;
     G.resetModel(); // every new lesson starts with the main model
-    auto = { stages: {}, waitingApproval: false, fallback: false, reviewError: null, story: null };
+    auto = { stages: {}, waitingApproval: false, fallback: false, reviewError: null, ideas: null, seen: [], idea: null, plan: null, story: null };
     STAGES.forEach(function (st) { auto.stages[st.id] = { state: '', note: '' }; });
-    if (state.settings.nikud === 'none') auto.stages.nikud = { state: 'skip', note: 'בלי ניקוד' };
     $('autoFlow').hidden = false;
-    flowMsg(null);
-    $('autoCreate').disabled = true;
-    stage('write', 'active');
-    var current = function () { return auto && run === autoRuns; };
-
-    // Three calls: a draft of the story, an editor's rewrite of it, then the exercises on the edited story
-    // (a smaller answer each, so each comes faster).
-    G.writeStory(key, window.buildStoryPrompt(state.request), streamOpts('write', 'כותב סיפור…', current)).then(function (text) {
-      if (!current()) return;
-      var story = readJson(text);
-      if (!story || typeof story.story !== 'string' || !story.story.trim()) {
-        writeFailed({ message: 'Gemini החזיר סיפור לא שלם.' });
-        return;
-      }
-      auto.story = story;
-      stage('write', 'done', auto.fallback ? 'הסיפור נכתב (במודל הגיבוי ' + G.currentModel() + ')' : '');
-      autoEdit(key, run);
-    }, function (e) {
-      if (current()) writeFailed(e);
-    });
+    autoIdeas(key, run);
   }
 
   function readJson(text) {
     try { return JSON.parse(text); } catch (e) { return null; }
   }
 
-  // The story was not written: nothing to keep; try again or copy-paste.
-  function writeFailed(e) {
+  // First call: 3 ideas (for an informational text, 3 angles). Also "3 רעיונות חדשים", without the ones already shown.
+  function autoIdeas(key, run) {
+    var current = function () { return auto && run === autoRuns; };
+    $('autoCreate').disabled = true;
+    flowMsg(null);
+    showPlanBox(null);
+    resetFrom('ideas');
+    stage('ideas', 'active');
+    var label = isInfo() ? 'מחפש זוויות לנושא…' : 'מחפש רעיונות…';
+    G.storyIdeas(key, window.buildIdeasPrompt(state.request, auto.seen), state.request.genre, streamOpts('ideas', label, current)).then(function (text) {
+      if (!current()) return;
+      var data = readJson(text);
+      var ideas = (data && Array.isArray(data.ideas) ? data.ideas : []).filter(function (i) {
+        return i && typeof i === 'object' && typeof i.title === 'string' && i.title.trim();
+      }).slice(0, 3);
+      if (!ideas.length) { callFailed('ideas', key, run, { message: 'Gemini החזיר רעיונות לא שלמים.' }); return; }
+      auto.ideas = ideas;
+      ideas.forEach(function (i) { auto.seen.push(i.title.trim()); });
+      stage('ideas', 'done', isInfo() ? 'הזוויות מוכנות' : '');
+      chooseTurn(key, run);
+    }, function (e) {
+      if (current()) callFailed('ideas', key, run, e);
+    });
+  }
+
+  // The teacher's turn: a card, 3 new ideas, or her own idea.
+  function chooseTurn(key, run) {
     $('autoCreate').disabled = false;
-    stage('write', 'fail', 'הכתיבה לא הצליחה');
-    markRest('write');
+    flowMsg(null);
+    resetFrom('choose');
+    stage('choose', 'wait', isInfo() ? 'בחרו זווית, בקשו 3 חדשות, או כתבו זווית משלכם' : 'בחרו רעיון, בקשו 3 רעיונות חדשים, או כתבו רעיון משלכם');
+    var info = isInfo();
+    var line = function (label, text) { return text ? el('p', null, el('strong', null, label + ': '), String(text)) : null; };
+    var own = el('textarea', { id: 'ownIdea', rows: 3, placeholder: info ? 'על מה הטקסט יתמקד?' : 'מי הדמות, מה היא רוצה, מה מפריע לה ואיך זה נגמר?' });
+    var ownMsgs = el('div', { class: 'msgs' });
+    var ownBox = el('div', { class: 'own-idea', hidden: true },
+      el('label', { for: 'ownIdea' }, info ? 'הזווית שלי' : 'הרעיון שלי'), own, ownMsgs,
+      el('div', { class: 'row' }, actionBtn(info ? 'תכנון לפי הזווית שלי ←' : 'תכנון לפי הרעיון שלי ←', function () {
+        var text = own.value.trim();
+        U.clear(ownMsgs);
+        if (!text) { ownMsgs.appendChild(msgBox('error', info ? 'כתבו את הזווית.' : 'כתבו את הרעיון.')); return; }
+        chooseIdea(key, run, { own: text });
+      }, true)));
+    showPlanBox(el('div', null,
+      el('h3', null, info ? 'בחרו זווית לטקסט' : 'בחרו רעיון לסיפור'),
+      el('div', { class: 'idea-cards' }, auto.ideas.map(function (idea, i) {
+        return el('div', { class: 'idea-card', 'data-idea': i },
+          el('h4', null, idea.title),
+          info ? line('הזווית', idea.angle)
+            : [line('הדמות', idea.character), line('רוצה', idea.want), line('מה מפריע', idea.obstacle), line('הסוף', idea.ending)],
+          (idea.words || []).length ? el('ul', { class: 'idea-words' }, idea.words.map(function (w) {
+            return el('li', null, el('strong', null, String((w && w.word) || '')), w && w.use ? ': ' + w.use : '');
+          })) : null,
+          el('div', { class: 'row end' }, actionBtn('בחירה', function () { chooseIdea(key, run, idea); }, true)));
+      })),
+      el('div', { class: 'row' },
+        actionBtn(info ? '🔄 3 זוויות חדשות' : '🔄 3 רעיונות חדשים', function () { autoIdeas(key, run); }),
+        actionBtn(info ? '✍️ זווית משלי' : '✍️ רעיון משלי', function () { ownBox.hidden = !ownBox.hidden; if (!ownBox.hidden) own.focus(); })),
+      ownBox));
+  }
+
+  function chooseIdea(key, run, idea) {
+    if (!auto || run !== autoRuns) return;
+    auto.idea = idea;
+    stage('choose', 'done', idea.own ? (isInfo() ? 'נבחרה זווית משלכם' : 'נבחר רעיון משלכם') : 'נבחר: ' + idea.title);
+    autoPlan(key, run);
+  }
+
+  // Second call: an outline of 4–6 scenes (subtopics) for the chosen idea.
+  function autoPlan(key, run) {
+    var current = function () { return auto && run === autoRuns; };
+    $('autoCreate').disabled = true;
+    flowMsg(null);
+    showPlanBox(null);
+    resetFrom('plan');
+    stage('plan', 'active');
+    var genre = window.Levels.genre(state.request.genre);
+    G.planStory(key, window.buildPlanPrompt(state.request, auto.idea), genre, streamOpts('plan', 'מתכנן את המתווה…', current)).then(function (text) {
+      if (!current()) return;
+      var plan = readPlan(readJson(text), genre);
+      if (!plan) { callFailed('plan', key, run, { message: 'Gemini החזיר מתווה לא שלם.' }); return; }
+      auto.plan = plan;
+      stage('plan', 'done');
+      planTurn(key, run);
+    }, function (e) {
+      if (current()) callFailed('plan', key, run, e);
+    });
+  }
+
+  // The plan call's answer → {title, idea, targetWords, scenes}, or null if it has no scenes or no target words.
+  function readPlan(data, genre) {
+    if (!data || typeof data !== 'object') return null;
+    var p = L.coercePlan({ idea: window.Prompt.ideaText(auto.idea, genre), scenes: data.scenes });
+    var words = (Array.isArray(data.targetWords) ? data.targetWords : []).map(function (t) {
+      return { word: H.normalize(String((t && t.word) || '')).trim(), emoji: String((t && t.emoji) || '').trim() };
+    }).filter(function (t) { return t.word; });
+    if (!p || !p.scenes.length || !words.length) return null;
+    return { title: H.normalize(String(data.title || '')).trim() || state.request.topic, idea: p.idea, targetWords: words, scenes: p.scenes };
+  }
+
+  // The teacher's turn: the outline, every field editable, then "כתוב את הסיפור".
+  function planTurn(key, run) {
+    $('autoCreate').disabled = false;
+    flowMsg(null);
+    resetFrom('approvePlan');
+    stage('approvePlan', 'wait', 'בדקו את המתווה, ערכו אם צריך, ולחצו "' + writeLabel() + '"');
+    renderPlanEditor(key, run);
+  }
+
+  function writeLabel() { return isInfo() ? 'כתוב את הטקסט' : 'כתוב את הסיפור'; }
+
+  function renderPlanEditor(key, run) {
+    var plan = auto.plan;
+    var info = isInfo();
+    var total = el('p', { class: 'muted small', id: 'planTotal' });
+    var msgs = el('div', { class: 'msgs' });
+    var list = el('ol', { class: 'plan-scenes' });
+    function sum() {
+      var n = plan.scenes.reduce(function (a, s) { return a + (s.length || 0); }, 0);
+      total.textContent = 'סך הכול בערך ' + n + ' מילים (התבקשו בערך ' + state.request.length + ').';
+    }
+    function field(label, input) { return el('label', { class: 'plan-field' }, el('span', null, label), input); }
+    function input(tag, value, onInput, attrs) {
+      return el(tag, Object.assign({ value: value, oninput: function () { onInput(this.value); } }, attrs || {}));
+    }
+    function redraw() {
+      U.clear(list);
+      plan.scenes.forEach(function (sc, i) {
+        list.appendChild(el('li', { class: 'plan-scene', 'data-scene': i },
+          el('div', { class: 'row' },
+            el('strong', { class: 'grow' }, (info ? 'תת-נושא ' : 'סצנה ') + (i + 1)),
+            plan.scenes.length > 1 ? el('button', { type: 'button', class: 'btn small quiet', title: 'מחיקה', 'aria-label': 'מחיקה',
+              onclick: function () { plan.scenes.splice(i, 1); redraw(); } }, '✕') : null),
+          field(info ? 'תת-הנושא' : 'מה קורה', input('textarea', sc.what, function (v) { sc.what = v; }, { rows: 2, 'data-f': 'what' })),
+          info ? field('עובדות מרכזיות', input('textarea', sc.facts, function (v) { sc.facts = v; }, { rows: 2, 'data-f': 'facts' }))
+            : field('הרגש', input('input', sc.feeling, function (v) { sc.feeling = v; }, { type: 'text', 'data-f': 'feeling' })),
+          el('div', { class: 'plan-row' },
+            field('מילות יעד', input('input', sc.words.join(', '), function (v) { sc.words = parseWordList(v); }, { type: 'text', 'data-f': 'words' })),
+            field('מילים', input('input', sc.length ? String(sc.length) : '', function (v) { sc.length = parseInt(v, 10) > 0 ? parseInt(v, 10) : 0; sum(); },
+              { type: 'number', min: '1', max: String(MAX_STORY_WORDS), class: 'narrow', 'data-f': 'length' })))));
+      });
+      sum();
+    }
+    redraw();
+    showPlanBox(el('div', null,
+      el('h3', null, info ? 'המתווה: תתי-נושאים' : 'המתווה: סצנות'),
+      el('p', { class: 'muted small' }, (info ? 'הזווית: ' : 'הרעיון: ') + plan.idea),
+      field('כותרת', input('input', plan.title, function (v) { plan.title = v; }, { type: 'text', id: 'planTitle' })),
+      el('div', { class: 'plan-field' }, el('span', null, 'מילות היעד'),
+        el('div', { class: 'plan-words' }, plan.targetWords.map(function (t) {
+          return el('span', { class: 'plan-word' },
+            input('input', t.emoji, function (v) { t.emoji = v.trim(); }, { type: 'text', class: 'emoji-in', 'aria-label': 'אימוג׳י' }),
+            input('input', t.word, function (v) { t.word = H.normalize(v).trim(); }, { type: 'text', 'aria-label': 'מילת יעד' }));
+        }))),
+      list,
+      el('div', { class: 'row' },
+        actionBtn('+ ' + (info ? 'תת-נושא' : 'סצנה'), function () {
+          plan.scenes.push({ what: '', feeling: '', facts: '', words: [], length: 0 });
+          redraw();
+          list.lastChild.querySelector('textarea').focus();
+        })),
+      total,
+      msgs,
+      el('div', { class: 'row' },
+        actionBtn(info ? '→ חזרה לזוויות' : '→ חזרה לרעיונות', function () { chooseTurn(key, run); }),
+        el('span', { class: 'grow' }),
+        el('button', { type: 'button', class: 'btn primary', id: 'writeFromPlan', onclick: function () {
+          var clean = cleanPlan(plan);
+          var problems = planProblems(clean);
+          U.clear(msgs);
+          if (problems.length) { msgs.appendChild(msgBox('error', null, problems)); return; }
+          auto.plan = clean;
+          autoWrite(key, run);
+        } }, '✍️ ' + writeLabel()))));
+  }
+
+  // The edited outline without empty scenes and words (the editor's fields stay as they are until it is valid).
+  function cleanPlan(plan) {
+    return Object.assign({}, plan, {
+      title: plan.title.trim(),
+      targetWords: plan.targetWords.filter(function (t) { return t.word; }),
+      scenes: plan.scenes.filter(function (s) { return s.what.trim() || (s.facts || '').trim(); })
+    });
+  }
+
+  // What must be fixed in the (clean) outline before writing.
+  function planProblems(plan) {
+    var problems = [];
+    if (!plan.title) problems.push('כתבו כותרת.');
+    if (!plan.scenes.length) problems.push(isInfo() ? 'צריך לפחות תת-נושא אחד.' : 'צריך לפחות סצנה אחת.');
+    if (plan.targetWords.length < 2) problems.push('צריך לפחות 2 מילות יעד.');
+    return problems;
+  }
+
+  // Third call: the text, written from the (edited) outline.
+  function autoWrite(key, run) {
+    var current = function () { return auto && run === autoRuns; };
+    var plan = auto.plan;
+    $('autoCreate').disabled = true;
+    flowMsg(null);
+    showPlanBox(null);
+    stage('approvePlan', 'done');
+    resetFrom('write');
+    stage('write', 'active');
+    G.writeStory(key, window.buildStoryPrompt(state.request, plan), streamOpts('write', 'כותב סיפור…', current)).then(function (text) {
+      if (!current()) return;
+      var res = readJson(text);
+      if (!res || typeof res.story !== 'string' || !res.story.trim()) {
+        callFailed('write', key, run, { message: 'Gemini החזיר סיפור לא שלם.' });
+        return;
+      }
+      auto.story = { title: plan.title, topic: state.request.topic, targetWords: plan.targetWords, story: res.story.trim() };
+      stage('write', 'done', auto.fallback ? 'הסיפור נכתב (במודל הגיבוי ' + G.currentModel() + ')' : '');
+      autoEdit(key, run);
+    }, function (e) {
+      if (current()) callFailed('write', key, run, e);
+    });
+  }
+
+  // A call before there is a story failed (ideas, plan, writing): try it again, go back a step, or copy-paste.
+  var FAILED = { ideas: 'לא הצלחתי להביא רעיונות', plan: 'התכנון לא הצליח', write: 'הכתיבה לא הצליחה' };
+  function callFailed(id, key, run, e) {
+    $('autoCreate').disabled = false;
+    stage(id, 'fail', FAILED[id]);
+    markRest(id);
     showStep(2);
+    var retry = { ideas: autoIdeas, plan: autoPlan, write: autoWrite }[id];
+    var mine = function (fn) { return function () { if (auto && run === autoRuns) fn(key, run); }; };
     flowMsg(el('div', null,
       msgBox('error', (e && e.message) || 'Gemini לא הצליח לכתוב את השיעור.',
         e && e.kind === 'key' ? [el('span', null, 'בדקו את המפתח בשלב 1, או ראו ', el('a', { href: 'gemini-setup.html', target: '_blank', rel: 'noopener' }, 'איך מקבלים מפתח'), '.')] : null),
       msgBox('info', 'אפשר להמשיך בהעתק-הדבק: הפרומפט מוכן כאן למטה. העתיקו אותו לכל צ׳אט (Gemini, ChatGPT ואחרים).'),
-      el('div', { class: 'row' }, actionBtn('↻ לנסות שוב', autoCreate, true))));
+      el('div', { class: 'row' },
+        actionBtn('↻ לנסות שוב', mine(retry), true),
+        id === 'plan' && auto.ideas ? actionBtn(isInfo() ? '→ חזרה לזוויות' : '→ חזרה לרעיונות', mine(chooseTurn)) : null,
+        id === 'write' ? actionBtn('→ חזרה למתווה', mine(planTurn)) : null)));
   }
 
-  // The second call: an editor rewrites the draft. The edit replaces the draft only if every target word is still
+  // After the writing: an editor rewrites the draft. The edit replaces the draft only if every target word is still
   // in it and its length changed by no more than the editor was allowed (with a little room); otherwise, or if
   // the call fails, the flow goes on with the draft.
   function autoEdit(key, run) {
@@ -1690,11 +1952,7 @@
 
   function retryExercises(key, run) {
     if (!auto || run !== autoRuns || !auto.story) return;
-    var after = false;
-    STAGES.forEach(function (st) {
-      if (st.id === 'exercises') after = true;
-      if (after && !(st.id === 'nikud' && state.settings.nikud === 'none')) auto.stages[st.id] = { state: '', note: '' };
-    });
+    resetFrom('exercises');
     autoExercises(key, run);
   }
 
@@ -1716,7 +1974,7 @@
           actionBtn('לראות את התשובה ולתקן', function () { showStep(3); parseResponse(); }))));
       return;
     }
-    acceptLesson(a.lesson, state.request);
+    acceptLesson(a.lesson, state.request, null, auto.plan || a.plan);
     stage('check', 'done', a.warnings.length ? 'השיעור עבר את הבדיקות (יש הערות בתצוגה)' : '');
     autoReview(key, run);
   }
@@ -1906,7 +2164,7 @@
     });
     $('copyFix').addEventListener('click', function () { copy($('fixText').textContent); });
     $('continueAnyway').addEventListener('click', function () {
-      if (pendingLesson) acceptLesson(pendingLesson, state.request);
+      if (pendingLesson) acceptLesson(pendingLesson, state.request, null, pendingPlan);
     });
 
     $('makeLink').addEventListener('click', function () {

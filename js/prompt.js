@@ -1,7 +1,9 @@
 /* The AI prompt template. Kept in one place so it is easy to tune.
-   Exposes window.buildPrompt (the whole lesson, for copy-paste) and, for the automatic flow with Gemini,
-   window.buildStoryPrompt, window.buildEditPrompt and window.buildExercisesPrompt (the same lesson in three calls:
-   a draft, an editor's rewrite of it, and the exercises). */
+   Like an author: first an idea, then a plan, and only then the writing.
+   Exposes window.buildPrompt (the whole lesson, for copy-paste: a plan field, then the story) and, for the
+   automatic flow with Gemini, window.buildIdeasPrompt (3 ideas), window.buildPlanPrompt (an outline of scenes),
+   window.buildStoryPrompt (the text, written from the outline), window.buildEditPrompt (an editor's rewrite of it)
+   and window.buildExercisesPrompt. */
 (function () {
   'use strict';
 
@@ -42,8 +44,17 @@
     });
   }
 
-  function schemaExample(counts, messageStyle) {
-    return Object.assign({ version: 1 }, storyExample(), { exercises: exercisesExample(counts, messageStyle) });
+  // The plan before the story (copy-paste prompt): the idea and the scenes. Shown to the teacher, not kept in the lesson.
+  function planExample(genre) {
+    return genre === 'info'
+      ? { idea: 'הזווית ב-2 עד 3 משפטים: על מה הטקסט מתמקד, ומה הילד ילמד ממנו.',
+          scenes: [{ what: 'תת-הנושא', facts: 'העובדות המרכזיות', words: ['מילה'], length: 40 }] }
+      : { idea: 'הרעיון ב-2 עד 3 משפטים: הדמות המרכזית ושמה, מה היא רוצה, מה מפריע לה ואיך זה נגמר.',
+          scenes: [{ what: 'מה קורה', feeling: 'הרגש', words: ['מילה'], length: 40 }] };
+  }
+
+  function schemaExample(counts, messageStyle, genre) {
+    return Object.assign({ version: 1, plan: planExample(genre) }, storyExample(), { exercises: exercisesExample(counts, messageStyle) });
   }
 
   // "3 שאלות" / "שאלה אחת": n with the noun (singular for one).
@@ -110,7 +121,7 @@
     '(אורך, מספר הופעות של מילה), האיכות קובעת.';
   var READ_ALOUD = 'לפני שאתה מחזיר את התשובה: קרא את הטקסט כאילו אתה מקריא אותו לילד, ותקן כל משפט שנשמע לא טבעי.';
 
-  // The structure of each kind of text (writing and editing prompts).
+  // The structure of each kind of text (the plan call, and the plan in the copy-paste prompt).
   var GENRE_LINES = {
     story: [
       '- דמות מרכזית עם שם, שיש לה רצון או בעיה.',
@@ -150,67 +161,247 @@
     return settings.exercises || window.Levels.exerciseDefaults(level.id, settings.genre);
   }
 
-  // The story part of the prompt: role, kind of text, topic, level, length, target words and the language rules.
-  function storyLines(settings, level) {
-    var genre = window.Levels.genre(settings.genre);
-    var n = noun(genre);
-    var lines = [
-      WRITER,
-      'כתוב ' + n.a + ' בעברית לילד שלומד לקרוא, בהוראה מותאמת.',
-      QUALITY,
-      '',
+  // Topic, kind of text, level and length: the head of every writing call.
+  function taskLines(settings, level) {
+    return [
       'נושא: ' + settings.topic,
-      'סוג הטקסט: ' + n.kind + '.',
+      'סוג הטקסט: ' + noun(settings.genre).kind + '.',
       'רמת קריאה: ' + level.label + '.',
-      'אורך: ' + storyShape(settings.length),
-      '',
-      genre === 'info' ? 'מבנה הטקסט המידעי:' : 'מבנה הסיפור:'
-    ].concat(GENRE_LINES[genre], ['', 'מילות יעד:']);
-    if (settings.wordsMode === 'list') {
-      lines.push('- מילות היעד: ' + settings.words.join(', ') + '.');
-    } else {
-      lines.push('- בחר ' + settings.wordCount + ' מילות יעד פשוטות ומוחשיות, שמשתלבות ב' + n.text +
-        ' באופן טבעי (לדוגמה: בסיפור על כדורגל, החפץ הוא "כדור", לא "כדורגל").');
-    }
-    lines.push(
-      '- השתמש בכל מילה רק במשמעות הנכונה שלה, ובמקום שבו היא מתאימה באופן טבעי.',
-      '- כל מילה מופיעה לפחות פעם אחת, ועדיף 2 עד 3 פעמים, אם זה טבעי.',
-      '- אסור להמציא משפט או דמות רק כדי לשלב מילה.',
-      '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה. רק אימוג׳י נפוץ וותיק שמוצג בכל מכשיר (כמו 🐶 🌳 ⚽ 🏠 🍎): ' +
-        'בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.',
-      '',
-      'שפה:'
-    );
-    languageLines(level, genre).forEach(function (l) { lines.push(l); });
-    lines.push(NO_NIKUD, KTIV, NO_EMOJI, '', READ_ALOUD);
+      'אורך: ' + storyShape(settings.length)
+    ];
+  }
+
+  // How many scenes (or subtopics) the outline has.
+  var SCENES = { min: 4, max: 6 };
+
+  var EMOJI_LINE = '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה. רק אימוג׳י נפוץ וותיק שמוצג בכל מכשיר (כמו 🐶 🌳 ⚽ 🏠 🍎): ' +
+    'בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.';
+
+  // The AI chooses the words: n simple, concrete words that the text needs.
+  function chooseWordsLine(settings, n) {
+    return '- בחר ' + settings.wordCount + ' מילות יעד פשוטות ומוחשיות, שמשתלבות ב' + n.text +
+      ' באופן טבעי (לדוגמה: בסיפור על כדורגל, החפץ הוא "כדור", לא "כדורגל").';
+  }
+
+  // How the target words are used in the text (the copy-paste prompt and the writing call).
+  var WORD_USE = [
+    '- השתמש בכל מילה רק במשמעות הנכונה שלה, ובמקום שבו היא מתאימה באופן טבעי.',
+    '- כל מילה מופיעה לפחות פעם אחת, ועדיף 2 עד 3 פעמים, אם זה טבעי.',
+    '- אסור להמציא משפט או דמות רק כדי לשלב מילה.'
+  ];
+
+  // The outline's fields, for the plan call and the plan field of the copy-paste prompt.
+  function sceneLines(settings, genre) {
+    var range = SCENES.min + ' עד ' + SCENES.max;
+    var lines = genre === 'info'
+      ? ['- scenes: מתווה של ' + range + ' תתי-נושאים, לפי הסדר בטקסט. לכל תת-נושא:',
+         '  - what: תת-הנושא.',
+         '  - facts: העובדות המרכזיות שהטקסט מסביר עליו.']
+      : ['- scenes: מתווה של ' + range + ' סצנות, לפי הסדר בסיפור. לכל סצנה:',
+         '  - what: מה קורה בה.',
+         '  - feeling: הרגש של הדמות בסצנה.'];
+    lines.push('  - words: מילות היעד שמופיעות בה.',
+      '  - length: כמה מילים בערך. סכום האורכים: בערך ' + settings.length + ' מילים.');
+    return lines;
+  }
+
+  // The language rules, the text rules and the style example (the copy-paste prompt and the writing call).
+  function writingRules(level, genre) {
+    var lines = ['', 'שפה:'].concat(languageLines(level, genre));
+    lines.push(NO_NIKUD, KTIV, NO_EMOJI);
+    var example = window.StyleExamples && window.StyleExamples.get(level.id, genre);
+    if (example) lines.push('', 'דוגמה לסגנון הכתיבה ברמה הזו (לא לנושא ולא לתוכן):', '---', example, '---');
+    lines.push('', READ_ALOUD);
     return lines;
   }
 
   // settings: {topic, length, level, genre: 'story'|'info', wordsMode: 'number'|'list', wordCount, words: [],
   //            exercises: {mcq: n, tf: n, ...} (optional: the level's defaults)}
+  // The whole lesson in one answer: a plan first (the idea and the outline), then the text written from it, then the exercises.
   function buildPrompt(settings) {
     var level = levelOf(settings.level);
+    var genre = window.Levels.genre(settings.genre);
+    var n = noun(genre);
     var counts = countsOf(settings, level);
-    var lines = storyLines(settings, level);
+    var lines = [
+      WRITER,
+      'כתוב ' + n.a + ' בעברית לילד שלומד לקרוא, בהוראה מותאמת.',
+      QUALITY,
+      ''
+    ].concat(taskLines(settings, level), [
+      '',
+      'קודם תכנן, אחר כך כתוב לפי התכנון.',
+      '',
+      'תכנון (בשדה plan, לפני ' + n.the + '):',
+      genre === 'info'
+        ? '- idea: הזווית ב-2 עד 3 משפטים: על מה הטקסט מתמקד, ומה הילד ילמד ממנו.'
+        : '- idea: הרעיון ב-2 עד 3 משפטים: הדמות המרכזית ושמה, מה היא רוצה, מה מפריע לה ואיך זה נגמר.'
+    ], sceneLines(settings, genre), [
+      '',
+      genre === 'info' ? 'מבנה הטקסט המידעי:' : 'מבנה הסיפור:'
+    ], GENRE_LINES[genre], ['', 'מילות יעד:']);
+    if (settings.wordsMode === 'list') lines.push('- מילות היעד: ' + settings.words.join(', ') + '.');
+    else lines.push(chooseWordsLine(settings, n));
+    lines = lines.concat(WORD_USE, [EMOJI_LINE, '', 'כתיבה (בשדה story):',
+      '- כתוב את ' + n.the + ' לפי התכנון, לפי הסדר ובערך באורך שתכננת לכל חלק.'], writingRules(level, genre));
     lines.push('', 'תרגילים (בסדר הזה):');
-    exerciseLines(counts, level).forEach(function (l) { lines.push(forGenre(l, settings.genre)); });
+    exerciseLines(counts, level).forEach(function (l) { lines.push(forGenre(l, genre)); });
     lines.push(
       '',
       'החזר את ה-JSON בתוך בלוק קוד אחד (```json), בלי שום טקסט לפניו או אחריו, בדיוק במבנה הזה' +
-        ' (בדוגמה תרגיל אחד מכל סוג; כתוב את מספר התרגילים שביקשתי):',
-      JSON.stringify(schemaExample(counts, level.messageStyle), null, 2)
+        ' (בדוגמה סצנה אחת ותרגיל אחד מכל סוג; כתוב את מספר הסצנות והתרגילים שביקשתי):',
+      JSON.stringify(schemaExample(counts, level.messageStyle, genre), null, 2)
     );
     return lines.join('\n');
   }
 
-  // First call of the automatic flow: the story and the target words only.
-  function buildStoryPrompt(settings) {
-    var lines = storyLines(settings, levelOf(settings.level));
-    lines.push('', 'החזר JSON בדיוק במבנה הזה:', JSON.stringify(storyExample(), null, 2));
+  /* ---------- The automatic flow: ideas, plan, writing ---------- */
+
+  // An idea as text, for the plan and writing prompts. idea: a card from the ideas call, or {own: the teacher's text}.
+  function ideaText(idea, genre) {
+    if (!idea) return '';
+    if (idea.own) return String(idea.own).trim();
+    var parts = [idea.title ? idea.title + '.' : ''];
+    if (window.Levels.genre(genre) === 'info') {
+      parts.push(idea.angle || '');
+    } else {
+      if (idea.character) parts.push('הדמות המרכזית: ' + idea.character + '.');
+      if (idea.want) parts.push('מה היא רוצה: ' + idea.want + '.');
+      if (idea.obstacle) parts.push('מה מפריע לה: ' + idea.obstacle + '.');
+      if (idea.ending) parts.push('איך זה נגמר: ' + idea.ending);
+    }
+    return parts.filter(Boolean).join(' ').replace(/([.?!])\./g, '$1');
+  }
+
+  function ideaWords(idea) {
+    return ((idea && idea.words) || []).map(function (w) { return String((w && w.word) || '').trim(); }).filter(Boolean);
+  }
+
+  // First call: 3 ideas for the text (for an informational text, 3 angles on the topic). If the AI chooses the
+  // target words, it chooses them here, from the plot. avoid: titles of ideas already shown, not to repeat.
+  function buildIdeasPrompt(settings, avoid) {
+    var level = levelOf(settings.level);
+    var genre = window.Levels.genre(settings.genre);
+    var n = noun(genre);
+    var info = genre === 'info';
+    var one = info ? 'זווית' : 'רעיון';
+    var lines = [
+      WRITER,
+      'לפני שכותבים ' + n.a + ' בעברית לילד שלומד לקרוא, בהוראה מותאמת, ' +
+        (info ? 'הצע 3 זוויות שונות לנושא.' : 'הצע 3 רעיונות שונים לסיפור.'),
+      ''
+    ].concat(taskLines(settings, level), ['', 'לכל ' + one + ':', '- title: כותרת.']);
+    if (info) {
+      lines.push('- angle: הזווית ב-2 עד 3 משפטים: על מה הטקסט מתמקד, ומה הילד ילמד ממנו.');
+    } else {
+      lines.push('- character: הדמות המרכזית ושמה.',
+        '- want: מה היא רוצה.',
+        '- obstacle: מה מפריע לה.',
+        '- ending: איך זה נגמר, ב-2 עד 3 משפטים.');
+    }
+    lines.push('- words: איך כל מילת יעד משתלבת ב' + n.text + ' באופן טבעי: המילה (word), ואיפה ולמה היא מופיעה (use).', '', 'מילות יעד:');
+    if (settings.wordsMode === 'list') {
+      lines.push('- מילות היעד: ' + settings.words.join(', ') + '. כל ' + one + ' משלב את כולן.');
+    } else {
+      lines.push(chooseWordsLine(settings, n),
+        '- בחר אותן מתוך ' + (info ? 'הזווית' : 'העלילה') + ': מילים ש' + n.the + ' צריך באמת, לא מילים שמוסיפים לו. לכל ' + one + ' המילים שלו.');
+    }
+    lines.push('', 'הנחיות:');
+    if (info) {
+      lines.push('- 3 זוויות שונות באמת: כל אחת מתמקדת בצד אחר של הנושא.',
+        '- זווית מצומצמת, שאפשר להסביר ב-' + settings.length + ' מילים, ברמת הקריאה הזו.',
+        '- עובדות נכונות, שמעניינות ילד.');
+    } else {
+      lines.push('- 3 רעיונות שונים באמת: דמות, רצון, בעיה וסוף אחרים.',
+        '- עלילה קטנה שאפשר לספר ב-' + settings.length + ' מילים, ברמת הקריאה הזו: רצון אחד, בעיה אחת ופתרון אחד.',
+        '- הדמות פותרת את הבעיה בעצמה, במעשה או ברעיון שלה, ולא במזל או בעזרת מבוגר שפותר הכול.',
+        '- רעיון שמעניין ילד, מהעולם שלו.');
+    }
+    if (avoid && avoid.length) lines.push('- אל תחזור על ' + (info ? 'הזוויות' : 'הרעיונות') + ' שכבר הוצעו: ' + avoid.join('; ') + '.');
+    lines.push(NO_NIKUD, KTIV);
+    var example = info
+      ? { title: 'כותרת', angle: 'הזווית.', words: [{ word: 'מילה', use: 'איפה ולמה היא מופיעה.' }] }
+      : { title: 'כותרת', character: 'הדמות ושמה', want: 'מה היא רוצה', obstacle: 'מה מפריע לה', ending: 'איך זה נגמר.',
+          words: [{ word: 'מילה', use: 'איפה ולמה היא מופיעה.' }] };
+    lines.push('', 'החזר JSON בדיוק במבנה הזה, עם 3 ' + (info ? 'זוויות' : 'רעיונות') + ':', JSON.stringify({ ideas: [example] }, null, 2));
     return lines.join('\n');
   }
 
-  // Second call of the automatic flow: an editor rewrites the draft ({title, targetWords, story}) for flow and
+  // Second call: an outline of 4–6 scenes (subtopics) for the chosen idea, with the target words and their emoji.
+  // idea: a card from buildIdeasPrompt's answer, or {own: the teacher's own idea}.
+  function buildPlanPrompt(settings, idea) {
+    var level = levelOf(settings.level);
+    var genre = window.Levels.genre(settings.genre);
+    var n = noun(genre);
+    var info = genre === 'info';
+    var lines = [
+      WRITER,
+      'תכנן ' + n.a + ' בעברית לילד שלומד לקרוא, בהוראה מותאמת, לפני שכותבים אותו.',
+      ''
+    ].concat(taskLines(settings, level), [
+      '',
+      (info ? 'הזווית' : 'הרעיון') + (idea && idea.own ? ' (של המורה)' : '') + ': ' + ideaText(idea, genre),
+      '',
+      'התכנון:',
+      '- title: כותרת.'
+    ], sceneLines(settings, genre), [
+      '',
+      info ? 'מבנה הטקסט המידעי:' : 'מבנה הסיפור:'
+    ], GENRE_LINES[genre], ['', 'מילות יעד (בשדה targetWords):']);
+    var words = settings.wordsMode === 'list' ? settings.words : ideaWords(idea);
+    if (words.length) lines.push('- מילות היעד: ' + words.join(', ') + '.');
+    else lines.push(chooseWordsLine(settings, n));
+    lines.push('- כל מילה מופיעה לפחות ב' + (info ? 'תת-נושא אחד' : 'סצנה אחת') + ', במקום שבו היא מתאימה באופן טבעי, ובמשמעות הנכונה שלה.',
+      EMOJI_LINE, NO_NIKUD, KTIV);
+    lines.push('', 'החזר JSON בדיוק במבנה הזה (בדוגמה ' + (info ? 'תת-נושא אחד' : 'סצנה אחת') + '):',
+      JSON.stringify({ title: 'כותרת', targetWords: [{ word: 'מילה', emoji: '🙂' }], scenes: planExample(genre).scenes }, null, 2));
+    return lines.join('\n');
+  }
+
+  // The outline as numbered lines, for the writing prompt.
+  function outlineLines(plan, genre) {
+    return (plan.scenes || []).map(function (s, i) {
+      var notes = [];
+      if (genre !== 'info' && s.feeling) notes.push('הרגש: ' + s.feeling + '.');
+      if (s.words && s.words.length) notes.push('מילות יעד: ' + s.words.join(', ') + '.');
+      if (s.length) notes.push('בערך ' + s.length + ' מילים.');
+      var what = String(s.what || '').trim();
+      if (genre === 'info' && s.facts) what += ': ' + String(s.facts).trim();
+      return (i + 1) + '. ' + what + (notes.length ? ' (' + notes.join(' ') + ')' : '');
+    });
+  }
+
+  // Third call: the text, written from the plan ({title, idea, targetWords, scenes}). The structure is in the plan,
+  // so this prompt has the plan, the target words, the language rules and the style example. Returns {story}.
+  function buildStoryPrompt(settings, plan) {
+    var level = levelOf(settings.level);
+    var genre = window.Levels.genre(settings.genre);
+    var n = noun(genre);
+    var info = genre === 'info';
+    var words = (plan.targetWords || []).map(function (w) { return w.word; }).filter(Boolean);
+    var lines = [
+      WRITER,
+      'כתוב ' + n.a + ' בעברית לילד שלומד לקרוא, בהוראה מותאמת, לפי התכנון שלמטה.',
+      QUALITY,
+      ''
+    ].concat(taskLines(settings, level), [
+      '',
+      'הכותרת: ' + plan.title,
+      (info ? 'הזווית: ' : 'הרעיון: ') + plan.idea,
+      '',
+      info ? 'תתי-הנושאים, לפי הסדר:' : 'הסצנות, לפי הסדר:'
+    ], outlineLines(plan, genre), [
+      '',
+      '- כתוב לפי התכנון, לפי הסדר ובערך באורך שנקבע לכל חלק. מותר לשנות פרט קטן אם זה משפר את ' + n.the +
+        ', אבל לא ' + (info ? 'את העובדות.' : 'את העלילה ואת הסוף.'),
+      '',
+      'מילות יעד: ' + words.join(', ') + '.'
+    ], WORD_USE, writingRules(level, genre));
+    lines.push('', 'החזר JSON בדיוק במבנה הזה (פסקאות מופרדות בשורה חדשה):', JSON.stringify({ story: storyExample().story }, null, 2));
+    return lines.join('\n');
+  }
+
+  // Fourth call of the automatic flow: an editor rewrites the draft ({title, targetWords, story}) for flow and
   // natural language, keeping the plot, the target words, the kind of text and the level. Returns {story}.
   function buildEditPrompt(settings, draft) {
     var level = levelOf(settings.level);
@@ -292,9 +483,12 @@
   }
 
   window.buildPrompt = buildPrompt;
+  window.buildIdeasPrompt = buildIdeasPrompt;
+  window.buildPlanPrompt = buildPlanPrompt;
   window.buildStoryPrompt = buildStoryPrompt;
   window.buildEditPrompt = buildEditPrompt;
   window.buildExercisesPrompt = buildExercisesPrompt;
   window.storyShape = storyShape;
-  window.Prompt = { LENGTH_SLACK: LENGTH_SLACK, languageLines: languageLines, GENRE_LINES: GENRE_LINES };
+  window.Prompt = { LENGTH_SLACK: LENGTH_SLACK, SCENES: SCENES, languageLines: languageLines, GENRE_LINES: GENRE_LINES,
+    ideaText: ideaText, ideaWords: ideaWords };
 })();

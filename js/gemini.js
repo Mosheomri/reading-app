@@ -10,9 +10,9 @@
   // with structured outputs (ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite).
   var FALLBACK_MODEL = 'gemini-3.5-flash-lite';
   // Thinking makes answers slower but better (ai.google.dev/gemini-api/docs/thinking): gemini-3.8-flash has
-  // low / medium / high, gemini-3.5-flash-lite also minimal. Writing and editing the story: medium, since the
-  // quality of the text matters most there. Exercises, review and the nikud check: low.
-  var THINKING = { 'write-story': 'medium', 'edit-story': 'medium', 'write-lesson': 'medium' };
+  // low / medium / high, gemini-3.5-flash-lite also minimal. The ideas, the plan, writing and editing the story:
+  // medium, since the quality of the text matters most there. Exercises, review and the nikud check: low.
+  var THINKING = { 'story-ideas': 'medium', 'story-plan': 'medium', 'write-story': 'medium', 'edit-story': 'medium', 'write-lesson': 'medium' };
   var THINKING_LEVEL = 'low';
   // The fallback model is used when the main one is overloaded: one level lower than asked, so it stays light.
   var FALLBACK_THINKING = { medium: 'low', low: 'minimal' };
@@ -89,13 +89,55 @@
     }
   };
 
-  // The automatic flow writes a lesson in three calls: a draft of the story, an editor's rewrite of it (EDIT_SCHEMA),
-  // then the exercises on it (window.buildStoryPrompt / buildEditPrompt / buildExercisesPrompt in js/prompt.js).
+  // The automatic flow, like an author: 3 ideas (IDEAS_SCHEMA), an outline for the chosen one (PLAN_SCHEMA), the text
+  // written from it (STORY_SCHEMA), an editor's rewrite of it (EDIT_SCHEMA), then the exercises
+  // (window.buildIdeasPrompt / buildPlanPrompt / buildStoryPrompt / buildEditPrompt / buildExercisesPrompt in js/prompt.js).
+  // Ideas and plan have a schema per kind of text: genre 'story' or 'info'.
+  var IDEA_WORDS = {
+    type: 'ARRAY',
+    items: {
+      type: 'OBJECT',
+      properties: { word: S, use: S },
+      required: ['word', 'use'],
+      propertyOrdering: ['word', 'use']
+    }
+  };
+  function ideasSchema(fields) {
+    var props = { title: S, words: IDEA_WORDS };
+    fields.forEach(function (f) { props[f] = S; });
+    var order = ['title'].concat(fields, ['words']);
+    return {
+      type: 'OBJECT',
+      properties: { ideas: { type: 'ARRAY', items: { type: 'OBJECT', properties: props, required: order, propertyOrdering: order } } },
+      required: ['ideas']
+    };
+  }
+  var IDEAS_SCHEMA = {
+    story: ideasSchema(['character', 'want', 'obstacle', 'ending']),
+    info: ideasSchema(['angle'])
+  };
+  function planSchema(field) {
+    var order = ['what', field, 'words', 'length'];
+    var props = { what: S, words: LIST, length: { type: 'INTEGER' } };
+    props[field] = S;
+    return {
+      type: 'OBJECT',
+      properties: {
+        title: S,
+        targetWords: TARGET_WORDS,
+        scenes: { type: 'ARRAY', items: { type: 'OBJECT', properties: props, required: order, propertyOrdering: order } }
+      },
+      required: ['title', 'targetWords', 'scenes'],
+      propertyOrdering: ['title', 'targetWords', 'scenes']
+    };
+  }
+  var PLAN_SCHEMA = { story: planSchema('feeling'), info: planSchema('facts') };
+
+  // The text written from the plan: the title and the target words are the plan's.
   var STORY_SCHEMA = {
     type: 'OBJECT',
-    properties: { title: S, topic: S, targetWords: TARGET_WORDS, story: STORY },
-    required: ['title', 'topic', 'targetWords', 'story'],
-    propertyOrdering: ['title', 'topic', 'targetWords', 'story']
+    properties: { story: STORY },
+    required: ['story']
   };
   var EXERCISES_SCHEMA = {
     type: 'OBJECT',
@@ -411,6 +453,8 @@
     currentModel: function () { return activeModel; },
     resetModel: function () { activeModel = MODEL; },
     LESSON_SCHEMA: LESSON_SCHEMA,
+    IDEAS_SCHEMA: IDEAS_SCHEMA,
+    PLAN_SCHEMA: PLAN_SCHEMA,
     STORY_SCHEMA: STORY_SCHEMA,
     EDIT_SCHEMA: EDIT_SCHEMA,
     EXERCISES_SCHEMA: EXERCISES_SCHEMA,
@@ -423,6 +467,9 @@
     checkKey: checkKey,
     generate: generate,
     writeLesson: function (key, prompt, opts) { return generate(key, prompt, LESSON_SCHEMA, Object.assign({ call: 'write-lesson' }, opts)); },
+    // genre: 'story' or 'info' (the schema of the ideas and of the plan).
+    storyIdeas: function (key, prompt, genre, opts) { return generate(key, prompt, IDEAS_SCHEMA[genre === 'info' ? 'info' : 'story'], Object.assign({ call: 'story-ideas' }, opts)); },
+    planStory: function (key, prompt, genre, opts) { return generate(key, prompt, PLAN_SCHEMA[genre === 'info' ? 'info' : 'story'], Object.assign({ call: 'story-plan' }, opts)); },
     writeStory: function (key, prompt, opts) { return generate(key, prompt, STORY_SCHEMA, Object.assign({ call: 'write-story' }, opts)); },
     editStory: function (key, prompt, opts) { return generate(key, prompt, EDIT_SCHEMA, Object.assign({ call: 'edit-story' }, opts)); },
     writeExercises: function (key, prompt, opts) { return generate(key, prompt, EXERCISES_SCHEMA, Object.assign({ call: 'write-exercises' }, opts)); },

@@ -38,7 +38,9 @@ def kind_of(body):
     props = body["generationConfig"]["responseSchema"].get("properties", {})
     if body["generationConfig"]["responseSchema"]["type"] == "ARRAY": return "review"
     if "lines" in props: return "nikud"
-    if "story" in props: return "write" if "title" in props else "edit"
+    if "ideas" in props: return "ideas"
+    if "scenes" in props: return "plan"
+    if "story" in props: return "edit" if body["contents"][0]["parts"][0]["text"].startswith("אתה עורך") else "write"
     return "exercises"
 
 class MockApi:
@@ -250,8 +252,13 @@ with sync_playwright() as p:
     ex_json = json.dumps({"exercises": [dict(e, answer=str(e["answer"]).lower()) if "answer" in e else e for e in plain["exercises"]]}, ensure_ascii=False)
     edited = "בוקר אחד, " + plain["story"]
 
+    ideas_json = json.dumps({"ideas": [{"title": "רעיון", "character": "דני", "want": "א", "obstacle": "ב", "ending": "ג", "angle": "זווית",
+                                        "words": [{"word": t, "use": "x"} for t in targets]}]}, ensure_ascii=False)
+    plan_json = json.dumps({"title": plain["title"], "targetWords": plain["targetWords"],
+                            "scenes": [{"what": "חלק", "feeling": "שמחה", "facts": "עובדות", "words": targets[:1], "length": STORY_WORDS}]}, ensure_ascii=False)
+
     def auto_run(edit_answer, genre="story"):
-        mock = MockApi({"write": story_json, "edit": edit_answer, "exercises": ex_json, "review": "[]"})
+        mock = MockApi({"ideas": ideas_json, "plan": plan_json, "write": story_json, "edit": edit_answer, "exercises": ex_json, "review": "[]"})
         ctx, page = new_page(browser, mock, key=KEY)
         page.check("input[name=genre][value=%s]" % genre)
         page.fill("#topic", "כלב בגינה")
@@ -259,15 +266,20 @@ with sync_playwright() as p:
         page.fill("#wordCount", str(len(targets)))
         page.check("input[name=nikud][value=none]")
         page.click("#autoCreate")
+        wait_stage(page, "choose", "wait")
+        page.click(".idea-card button")
+        wait_stage(page, "approvePlan", "wait")
+        page.click("#writeFromPlan")
         wait_stage(page, "review", "done")
         return ctx, page, mock
 
     ctx, page, mock = auto_run(json.dumps({"story": edited}, ensure_ascii=False))
     stages = page.eval_on_selector_all("#autoStages li", "els => els.map(e => e.dataset.stage)")
-    check(stages[:3] == ["write", "edit", "exercises"] and "הסיפור נערך" in stage_text(page, "edit"), "stages: write → edit ('הסיפור נערך') → exercises")
+    check(stages[:7] == ["ideas", "choose", "plan", "approvePlan", "write", "edit", "exercises"] and "הסיפור נערך" in stage_text(page, "edit"),
+          "stages: ideas → choice → plan → approval → write → edit ('הסיפור נערך') → exercises")
     levels = [(x["kind"], x["body"]["generationConfig"]["thinkingConfig"]["thinkingLevel"]) for x in mock.log]
-    check(levels == [("write", "medium"), ("edit", "medium"), ("exercises", "low"), ("review", "low")],
-          "thinking: medium for writing and editing, low for exercises and review (%s)" % levels)
+    check(levels == [("ideas", "medium"), ("plan", "medium"), ("write", "medium"), ("edit", "medium"), ("exercises", "low"), ("review", "low")],
+          "thinking: medium for ideas, planning, writing and editing, low for exercises and review (%s)" % levels)
     ep = mock.of("edit")[0]["prompt"]
     check(ep.startswith("אתה עורך ספרי ילדים מנוסה.") and plain["story"] in ep and "הכותרת: " + plain["title"] in ep
           and ("- מילות היעד: " + ", ".join(targets) + ".") in ep and "- סוג הטקסט: סיפור." in ep
@@ -301,8 +313,9 @@ with sync_playwright() as p:
     ep = mock.of("edit")[0]["prompt"]
     check("טיוטה של טקסט מידעי קצר" in ep and "- סוג הטקסט: טקסט מידעי. אל תהפוך אותו לסיפור" in ep and "אותן עובדות" in ep,
           "edit prompt (info): keeps the facts and the kind of text")
-    check(mock.of("write")[0]["prompt"].count("מבנה הטקסט המידעי:") == 1 and "הטקסט:" in mock.of("exercises")[0]["prompt"],
-          "automatic flow (info): the writer and the exercises get the informational text's prompts")
+    check(mock.of("plan")[0]["prompt"].count("מבנה הטקסט המידעי:") == 1 and "תתי-הנושאים, לפי הסדר:" in mock.of("write")[0]["prompt"]
+          and "1. חלק: עובדות" in mock.of("write")[0]["prompt"] and "הטקסט:" in mock.of("exercises")[0]["prompt"],
+          "automatic flow (info): the plan, the writer and the exercises get the informational text's prompts")
     ctx.close()
 
     check(not errors, "no page errors (%s)" % errors[:3])

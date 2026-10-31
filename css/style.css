@@ -709,3 +709,27 @@ code.addr { direction: ltr; unicode-bidi: isolate; background: #f6f2ea; border-r
 .print-sheet .p-answers li { margin: 2mm 0; }
 .print-sheet .p-order-key { list-style: none; margin: 1mm 0 0; padding: 0; }
 .print-sheet .p-key { display: inline-block; min-width: 7mm; padding: 0 1.5mm; margin-inline-end: 3mm; border: 1.5px solid #000; text-align: center; font-weight: 700; }
+
+/* Automatic flow: the idea cards and the outline (the teacher's turns) */
+.auto-plan { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.auto-plan h3 { margin: 0 0 10px; }
+.idea-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.idea-card { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; background: #fdfcf9; display: flex; flex-direction: column; }
+.idea-card h4 { margin: 0 0 8px; color: var(--primary); }
+.idea-card p { margin: 0 0 6px; }
+.idea-card .row { margin-top: auto; padding-top: 8px; }
+.idea-words { margin: 4px 0 0; padding-inline-start: 18px; font-size: 0.9rem; color: var(--muted); }
+.own-idea { margin-top: 12px; }
+.own-idea label, .plan-field > span { display: block; font-weight: 600; margin-bottom: 4px; }
+.plan-field { display: block; margin-bottom: 10px; }
+.plan-scenes { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 10px; }
+.plan-scene { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #fdfcf9; }
+.plan-row { display: flex; gap: 10px; align-items: flex-end; }
+.plan-row .plan-field:first-child { flex: 1 1 auto; }
+.plan-words { display: flex; flex-wrap: wrap; gap: 8px; }
+.plan-word { display: inline-flex; gap: 4px; }
+.plan-word input { width: 9em; }
+.plan-word input.emoji-in { width: 3.4em; text-align: center; }
+.plan-view { margin-bottom: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; background: #fdfcf9; }
+.plan-view summary { cursor: pointer; font-weight: 600; }
+.plan-view ol { margin: 6px 0 0; padding-inline-start: 22px; }

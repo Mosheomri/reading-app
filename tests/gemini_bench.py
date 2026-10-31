@@ -1,6 +1,6 @@
 """Real Gemini timing (not part of run_all.py: it calls the API and uses quota).
 For each of the two models (main and fallback, as in js/gemini.js) it writes a few lessons the way the automatic
-flow does: the story, then the exercises on it, streamed, with the same prompts, schemas and thinking settings
+flow does: 3 ideas, an outline for the first one, the story written from it, then the exercises on it, streamed, with the same prompts, schemas and thinking settings
 as the app. It measures the time to the first data, to the first answer text and in total, and counts failures.
 
 The key is read from the environment only (never saved, never printed):
@@ -105,11 +105,11 @@ with sync_playwright() as p:
     app = page.evaluate("""(topic) => ({
       models: [[Gemini.MODEL, Gemini.THINKING_LEVEL], [Gemini.FALLBACK_MODEL, Gemini.FALLBACK_THINKING_LEVEL]],
       first: Gemini.config.firstDataTimeout / 1000, idle: Gemini.config.idleTimeout / 1000,
-      story: Gemini.STORY_SCHEMA, exercises: Gemini.EXERCISES_SCHEMA,
+      ideas: Gemini.IDEAS_SCHEMA.story, plan: Gemini.PLAN_SCHEMA.story, story: Gemini.STORY_SCHEMA, exercises: Gemini.EXERCISES_SCHEMA,
       settings: { topic, length: +document.getElementById('length').value, level: Levels.DEFAULT, wordsMode: 'number',
                   wordCount: +document.getElementById('wordCount').value, words: [] } })""", args.topic)
     settings = app["settings"]
-    story_prompt = page.evaluate("(s) => buildStoryPrompt(s)", settings)
+    ideas_prompt = page.evaluate("(s) => buildIdeasPrompt(s, [])", settings)
     print("Settings: %s; timeouts: %d s to the first data, %d s between pieces; %d runs per model\n"
           % (json.dumps(settings, ensure_ascii=False), app["first"], app["idle"], args.runs))
 
@@ -120,11 +120,18 @@ with sync_playwright() as p:
             res = {"model": model, "run": run, "calls": {}}
             t0 = time.monotonic()
             try:
-                for call in ("story", "exercises"):
-                    if call == "story":
-                        prompt, schema = story_prompt, app["story"]
+                for call in ("ideas", "plan", "story", "exercises"):
+                    c = res["calls"]
+                    if call == "ideas":
+                        prompt, schema = ideas_prompt, app["ideas"]
+                    elif call == "plan":
+                        prompt, schema = page.evaluate("([s, i]) => buildPlanPrompt(s, i)", [settings, c["ideas"]["json"]["ideas"][0]]), app["plan"]
+                    elif call == "story":
+                        idea = c["ideas"]["json"]["ideas"][0]
+                        plan = dict(c["plan"]["json"], idea=page.evaluate("(i) => Prompt.ideaText(i, 'story')", idea))
+                        prompt, schema = page.evaluate("([s, p]) => buildStoryPrompt(s, p)", [settings, plan]), app["story"]
                     else:
-                        prompt, schema = page.evaluate("([s, st]) => buildExercisesPrompt(s, st)", [settings, res["calls"]["story"]["json"]]), app["exercises"]
+                        prompt, schema = page.evaluate("([s, st]) => buildExercisesPrompt(s, st)", [settings, dict(title=c["plan"]["json"]["title"], targetWords=c["plan"]["json"]["targetWords"], story=c["story"]["json"]["story"])]), app["exercises"]
                     try:
                         r = stream(model, level, prompt, schema, app["first"], app["idle"])
                     except Fail as e:
@@ -143,7 +150,7 @@ with sync_playwright() as p:
             results.append(res)
     browser.close()
 
-print("\nSummary (a lesson = story + exercises; no automatic retries here, so every failure counts)")
+print("\nSummary (a lesson = ideas + plan + story + exercises, without the teacher's turns; no automatic retries here, so every failure counts)")
 print("%-22s %8s %22s %22s %18s %18s" % ("model", "failed", "story: first data / total", "exercises: first / total", "lesson total (avg)", "lesson total (max)"))
 summary = {}
 for model, _ in app["models"]:

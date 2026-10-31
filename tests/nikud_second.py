@@ -43,13 +43,20 @@ def kind_of(body):
     props = body["generationConfig"]["responseSchema"].get("properties", {})
     if body["generationConfig"]["responseSchema"]["type"] == "ARRAY": return "review"
     if "lines" in props: return "nikud"
+    if "ideas" in props: return "ideas"
+    if "scenes" in props: return "plan"
     return "write" if "story" in props else "exercises"
 
 class MockApi:
     """story / exercises / review: fixed answers. nikud: each line sent is answered from self.nikud_map
     (plain line → vocalized line), or from queue (an HTTP error) first. With hold, nikud requests wait for release()."""
     def __init__(self, story_json, exercises_json):
-        self.answers = {"write": story_json, "exercises": exercises_json, "review": "[]"}
+        story = json.loads(story_json)
+        words = [{"word": t["word"], "use": "x"} for t in story["targetWords"]]
+        self.answers = {"write": story_json, "exercises": exercises_json, "review": "[]",
+                        "ideas": json.dumps({"ideas": [{"title": "רעיון", "character": "דני", "want": "א", "obstacle": "ב", "ending": "ג", "words": words}]}, ensure_ascii=False),
+                        "plan": json.dumps({"title": story["title"], "targetWords": story["targetWords"],
+                                            "scenes": [{"what": "סצנה", "feeling": "שמחה", "words": [], "length": 30}]}, ensure_ascii=False)}
         self.nikud_map = {}
         self.queue = []
         self.log = []
@@ -116,6 +123,14 @@ def fill_form(page, nikud="full"):
     page.evaluate("""() => { const c = {mcq: 3, tf: 2, fill: 2, order: 1, open: 0, locate: 0, message: 0};
       for (const k in c) { const i = document.querySelector('[data-count="' + k + '"]'); i.value = c[k]; i.dispatchEvent(new Event('input')); } }""")
 
+def start_auto(page):
+    """'✨ צור שיעור', the first idea, and the outline as it is."""
+    page.click("#autoCreate")
+    page.wait_for_selector(".idea-card button", timeout=15000)
+    page.click(".idea-card button")
+    page.wait_for_selector("#writeFromPlan", timeout=15000)
+    page.click("#writeFromPlan")
+
 def stage_class(page, sid):
     return page.evaluate("(s) => (document.querySelector('#autoStages li[data-stage=\"' + s + '\"]') || {}).className", sid)
 
@@ -126,7 +141,7 @@ def lesson_from_draft(page):
 def to_dicta_wait(page):
     """The automatic flow up to the nikud stage, which waits for the teacher (no bridge here)."""
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     page.wait_for_function("() => { const li = document.querySelector('#autoStages li[data-stage=\"nikud\"]'); return li && li.className === 'wait'; }", timeout=15000)
 
 def paste_dicta(page):
@@ -361,7 +376,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx)
     fill_form(page, nikud="partial")
-    page.click("#autoCreate")
+    start_auto(page)
     page.wait_for_function("() => { const li = document.querySelector('#autoStages li[data-stage=\"nikud\"]'); return li && li.className === 'wait'; }", timeout=15000)
     paste_dicta(page)
     page.wait_for_function("() => /ניקד כמו דיקטה|לבדיקה/.test(document.querySelector('#secondMsgs').textContent)", timeout=10000)

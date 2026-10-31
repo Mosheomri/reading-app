@@ -198,6 +198,21 @@
   // Returns {lesson, fatal: [messages], notes: [messages]}. A lesson is returned whenever
   // it can be previewed/edited; fatal lists problems that make that impossible;
   // notes lists automatic fixes that were applied.
+  // The plan an AI wrote before the story (the copy-paste answer's "plan", or the automatic flow's outline):
+  // {idea, scenes: [{what, feeling, facts, words: [], length}]}, or null when there is none. Shown to the teacher,
+  // never kept in the lesson.
+  function coercePlan(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    var scenes = (Array.isArray(raw.scenes) ? raw.scenes : []).map(function (sc) {
+      sc = sc && typeof sc === 'object' ? sc : { what: sc };
+      var words = Array.isArray(sc.words) ? strList(sc.words) : str(sc.words).split(/[,،]+/).map(function (w) { return w.trim(); });
+      var length = parseInt(sc.length, 10);
+      return { what: str(sc.what), feeling: str(sc.feeling), facts: str(sc.facts), words: words.filter(Boolean), length: length > 0 ? length : 0 };
+    }).filter(function (sc) { return sc.what || sc.facts; });
+    var idea = str(raw.idea);
+    return idea || scenes.length ? { idea: idea, scenes: scenes } : null;
+  }
+
   function coerce(raw) {
     var fatal = [];
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -564,6 +579,7 @@
     TYPE_NAMES: TYPE_NAMES,
     extractJson: extractJson,
     coerce: coerce,
+    coercePlan: coercePlan,
     check: check,
     sortOrderExercises: sortOrderExercises,
     unvocalizedWords: unvocalizedWords,

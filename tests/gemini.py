@@ -1,6 +1,7 @@
 """Automatic lesson with the Gemini API, against a mock API (Playwright routing: nothing goes to the network).
-Key box, structured-output requests, the flow (story → exercises → checks → review → approvals → nikud through
-the Dicta bridge mock), timeouts, errors with one automatic retry, and the copy-paste fallback."""
+Key box, structured-output requests, the flow (ideas → the teacher chooses → plan → the teacher approves → story →
+edit → exercises → checks → review → approvals → nikud through the Dicta bridge mock), timeouts, errors with one
+automatic retry, and the copy-paste fallback. More on the ideas and the plan in tests/story_plan.py."""
 import json, sys, os, mimetypes
 from urllib.parse import urlparse, unquote
 from playwright.sync_api import sync_playwright
@@ -53,31 +54,48 @@ def api_error(status, message, reason=None, st="INVALID_ARGUMENT"):
     return status, {"error": e}
 
 def split_lesson(lesson_json):
-    """The two answers of the automatic flow: the story (title, topic, targetWords, story) and {exercises}."""
+    """The answers of the automatic flow: the story ({story}) and {exercises}."""
     lesson = json.loads(lesson_json)
-    story = {k: lesson[k] for k in ("title", "topic", "targetWords", "story")}
-    return json.dumps(story, ensure_ascii=False), json.dumps({"exercises": lesson["exercises"]}, ensure_ascii=False)
+    return json.dumps({"story": lesson["story"]}, ensure_ascii=False), json.dumps({"exercises": lesson["exercises"]}, ensure_ascii=False)
+
+def ideas_answer(lesson, tag=""):
+    """3 ideas; each uses the lesson's target words."""
+    words = [{"word": t["word"], "use": "במקום טבעי"} for t in lesson["targetWords"]]
+    return json.dumps({"ideas": [{"title": "רעיון %s%d" % (tag, i + 1), "character": "דני", "want": "למצוא את הכדור",
+                                  "obstacle": "הכדור נעלם", "ending": "דני מוצא אותו.", "words": words} for i in range(3)]}, ensure_ascii=False)
+
+def plan_answer(lesson):
+    """An outline with the lesson's title and target words, 4 scenes."""
+    words = [t["word"] for t in lesson["targetWords"]]
+    return json.dumps({"title": lesson["title"], "targetWords": lesson["targetWords"],
+                       "scenes": [{"what": "סצנה %d" % (i + 1), "feeling": "שמחה", "words": words[i:i + 1], "length": 30} for i in range(4)]}, ensure_ascii=False)
 
 def request_kind(body):
-    """write (the story) | edit (the editor's rewrite) | exercises | review | nikud (second opinion), from the responseSchema."""
+    """ideas | plan | write (the story) | edit (the editor's rewrite) | exercises | review | nikud (second opinion),
+    from the responseSchema (write and edit have the same one: the editor's prompt starts with its role)."""
     schema = body["generationConfig"]["responseSchema"]
     if schema["type"] == "ARRAY": return "review"
-    if "lines" in schema["properties"]: return "nikud"
-    if "story" in schema["properties"]: return "write" if "title" in schema["properties"] else "edit"
+    props = schema["properties"]
+    if "lines" in props: return "nikud"
+    if "ideas" in props: return "ideas"
+    if "scenes" in props: return "plan"
+    if "story" in props: return "edit" if body["contents"][0]["parts"][0]["text"].startswith("אתה עורך") else "write"
     return "exercises"
 
 class MockApi:
-    """Answers in order from queue[kind] (kind: models | write | edit | exercises | review), else a default
+    """Answers in order from queue[kind] (kind: models | ideas | plan | write | edit | exercises | review), else a default
     (edit: the story as it was).
     'abort' = network error, 'hang' = never answers. With hold=True, generate requests wait until release()."""
     def __init__(self, lesson_json, review_json="[]"):
-        self.queue = {"models": [], "write": [], "edit": [], "exercises": [], "review": [], "nikud": []}
+        self.queue = {"models": [], "ideas": [], "plan": [], "write": [], "edit": [], "exercises": [], "review": [], "nikud": []}
         self.log = []
         self.hold = False
         self.held = []
         self.hung = []
         story_json, exercises_json = split_lesson(lesson_json)
-        self.defaults = {"models": (200, {"name": "models/x"}), "write": reply(story_json), "exercises": reply(exercises_json),
+        lesson = json.loads(lesson_json)
+        self.defaults = {"models": (200, {"name": "models/x"}), "ideas": reply(ideas_answer(lesson)), "plan": reply(plan_answer(lesson)),
+                         "write": reply(story_json), "exercises": reply(exercises_json),
                          "edit": reply(json.dumps({"story": json.loads(story_json)["story"]}, ensure_ascii=False)),
                          "review": reply(review_json)}
 
@@ -164,6 +182,14 @@ def wait_stage(page, sid, cls, timeout=15000):
     page.wait_for_function("([s, c]) => { const li = document.querySelector('#autoStages li[data-stage=\"' + s + '\"]'); return li && li.className === c; }",
                            arg=[sid, cls], timeout=timeout)
 
+def start_auto(page):
+    """'✨ צור שיעור', then the teacher's turns: the first idea, and the outline as it is."""
+    page.click("#autoCreate")
+    wait_stage(page, "choose", "wait")
+    page.click(".idea-card[data-idea='0'] button")
+    wait_stage(page, "approvePlan", "wait")
+    page.click("#writeFromPlan")
+
 with sync_playwright() as p:
     browser = p.chromium.launch(channel="chrome")
 
@@ -217,7 +243,7 @@ with sync_playwright() as p:
     check(page.evaluate("localStorage.getItem('readingApp.geminiKey')") is None and page.is_hidden("#autoCreate"), "delete key: removed, auto button hidden")
     ctx.close()
 
-    # ---------- Full flow: write, check, review, approvals, nikud through the bridge ----------
+    # ---------- Full flow: ideas, plan, write, check, review, approvals, nikud through the bridge ----------
     mock = MockApi(LESSON_JSON, SUGGESTIONS)
     ctx = new_context(browser, mock, bridge=True)
     page = open_teacher(ctx, key=KEY, bridge_known=True)
@@ -225,26 +251,55 @@ with sync_playwright() as p:
     mock.hold = True
     page.click("#autoCreate")
     page.wait_for_function("() => document.querySelector('#autoStages li.active')")
-    check(page.is_visible("#autoFlow") and stage_of(page, "write")[1] == "active" and "כותב סיפור" in stage_of(page, "write")[2]
-          and page.is_disabled("#autoCreate"), "progress: 'כותב סיפור…' while writing, button disabled")
-    check([s[0] for s in stages(page)] == ["write", "edit", "exercises", "check", "review", "approve", "nikud"],
-          "stages: story, edit and exercises are separate")
+    check(page.is_visible("#autoFlow") and stage_of(page, "ideas")[1] == "active" and "מחפש רעיונות" in stage_of(page, "ideas")[2]
+          and page.is_disabled("#autoCreate"), "progress: 'מחפש רעיונות…' first, button disabled")
+    check([s[0] for s in stages(page)] == ["ideas", "choose", "plan", "approvePlan", "write", "edit", "exercises", "check", "review", "approve", "nikud"],
+          "stages: ideas, the teacher's choice, plan, the teacher's approval, then story, edit and exercises")
+    page.wait_for_timeout(200)
+    i = [x for x in mock.log if x["kind"] == "ideas"][-1]
+    igc = i["body"]["generationConfig"]
+    check(i["url"] == API + "v1beta/models/" + MODEL + ":streamGenerateContent?alt=sse" and i["headers"].get("x-goog-api-key") == KEY,
+          "ideas: POST models/%s:streamGenerateContent?alt=sse (streamed) with the key header" % MODEL)
+    check(igc.get("thinkingConfig") == {"thinkingLevel": "medium", "includeThoughts": True}
+          and igc["responseSchema"]["properties"]["ideas"]["items"]["required"] == ["title", "character", "want", "obstacle", "ending", "words"],
+          "ideas: thinkingLevel = medium, structured output with the idea fields")
+    check(mock.count("write") == 0 and mock.count("plan") == 0, "nothing is written before an idea is chosen")
+    mock.release()
+    wait_stage(page, "choose", "wait")
+    check(page.locator(".idea-card").count() == 3 and "רעיון 1" in page.text_content(".idea-card[data-idea='0']")
+          and "בחרו רעיון" in stage_of(page, "choose")[2] and not page.is_disabled("#autoCreate"),
+          "3 idea cards; the teacher's turn (👆 בחרו רעיון)")
+    page.click(".idea-card[data-idea='0'] button")
+    wait_stage(page, "plan", "active")
+    page.wait_for_timeout(200)
+    pl = [x for x in mock.log if x["kind"] == "plan"][-1]
+    pgc = pl["body"]["generationConfig"]
+    pp = pl["body"]["contents"][0]["parts"][0]["text"]
+    check(pgc["thinkingConfig"] == {"thinkingLevel": "medium", "includeThoughts": True} and set(pgc["responseSchema"]["required"]) == {"title", "targetWords", "scenes"}
+          and "רעיון 1" in pp and "דני" in pp and "נבחר: רעיון 1" in stage_of(page, "choose")[2],
+          "plan: thinkingLevel = medium, schema {title, targetWords, scenes}, the chosen idea in the prompt")
+    mock.release()
+    wait_stage(page, "approvePlan", "wait")
+    check(page.locator(".plan-scene").count() == 4 and page.input_value("#planTitle") == plain["title"] and mock.count("write") == 0,
+          "the outline is shown for editing (4 scenes, the title); nothing written yet")
+    page.fill(".plan-scene[data-scene='0'] textarea[data-f=what]", "סצנה ערוכה בידי המורה")
+    page.click("#writeFromPlan")
+    page.wait_for_function("() => document.querySelector('#autoStages li.active')")
+    check(stage_of(page, "write")[1] == "active" and "כותב סיפור" in stage_of(page, "write")[2] and page.is_hidden("#autoPlan")
+          and stage_of(page, "approvePlan")[1] == "done", "progress: 'כותב סיפור…' after the outline is approved")
     page.wait_for_timeout(200)
     check(mock.count("write") == 1 and mock.count("exercises") == 0, "the exercises wait for the story")
     w = [x for x in mock.log if x["kind"] == "write"][-1]
     gc = w["body"]["generationConfig"]
-    check(w["url"] == API + "v1beta/models/" + MODEL + ":streamGenerateContent?alt=sse" and w["headers"].get("x-goog-api-key") == KEY,
-          "story: POST models/%s:streamGenerateContent?alt=sse (streamed) with the key header" % MODEL)
     check(gc.get("thinkingConfig") == {"thinkingLevel": "medium", "includeThoughts": True},
           "story: thinkingLevel = medium (quality of the text), includeThoughts so thought summaries stream")
     check(gc["responseMimeType"] == "application/json" and gc["responseSchema"]["type"] == "OBJECT"
-          and set(gc["responseSchema"]["required"]) == {"title", "topic", "targetWords", "story"} and "exercises" not in gc["responseSchema"]["properties"],
-          "story: structured output with the small story schema (no exercises)")
+          and set(gc["responseSchema"]["required"]) == {"story"} and "exercises" not in gc["responseSchema"]["properties"],
+          "story: structured output with the small story schema {story}")
     story_prompt = w["body"]["contents"][0]["parts"][0]["text"]
-    pasted = page.text_content("#promptText")
-    common = pasted.split("תרגילים (בסדר הזה):")[0]
-    check(story_prompt.startswith(common) and "תרגילים" not in story_prompt[len(common):] and '"story"' in story_prompt,
-          "story prompt: the story part of the copy-paste prompt, then the story structure only")
+    check("1. סצנה ערוכה בידי המורה" in story_prompt and "לפי התכנון" in story_prompt and "מבנה הסיפור" not in story_prompt
+          and "דוגמה לסגנון הכתיבה ברמה הזו (לא לנושא ולא לתוכן):" in story_prompt and all(t["word"] in story_prompt for t in plain["targetWords"]),
+          "story prompt: the edited outline, the target words and a style example; no story-structure rules")
     mock.release()
     wait_stage(page, "edit", "active")
     page.wait_for_timeout(200)
@@ -326,7 +381,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     wait_stage(page, "approve", "wait")
     page.locator("#reviewList .review-item button:has-text('דחה'):visible").first.click()
     page.locator("#reviewList .review-item button:has-text('דחה'):visible").first.click()
@@ -346,7 +401,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page, nikud="none")
-    page.click("#autoCreate")
+    start_auto(page)
     page.wait_for_function("() => document.querySelector('#autoFlowMsgs').textContent.includes('השיעור מוכן')", timeout=15000)
     check(stage_of(page, "approve")[1] == "skip" and stage_of(page, "nikud")[1] == "skip" and "לא נמצא מה לתקן" in stage_of(page, "review")[2],
           "no nikud, no suggestions: ready right away")
@@ -359,7 +414,7 @@ with sync_playwright() as p:
         ctx = new_context(browser, mock)
         page = open_teacher(ctx, key=KEY)
         fill_form(page, nikud)
-        page.click("#autoCreate")
+        start_auto(page)
         page.wait_for_function("() => document.querySelector('#autoStages li.fail')", timeout=15000)
         m = flow_msgs(page)
         check(expect in m and "הפרומפט מוכן" in m and page.is_visible("#step2") and page.text_content("#promptText").strip() != "",
@@ -384,7 +439,7 @@ with sync_playwright() as p:
           "timeouts: 120 s for plain requests, 120 s to the first data of a stream, then 45 s between pieces")
     page.evaluate("Gemini.config.firstDataTimeout = 1500")
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     page.wait_for_function("() => document.querySelector('#autoStages li.fail')", timeout=15000)
     check("לא התחיל לענות (2 שניות)" in flow_msgs(page) and mock.count("write") == 2 and "הפרומפט מוכן" in flow_msgs(page),
           "no data before the first-data time: timeout, one retry, message with the copy-paste way")
@@ -457,7 +512,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     wait_stage(page, "review", "done")
     check(mock.count("write") == 2 and any("UNAVAILABLE The model is overloaded." in c for c in console),
           "error event inside the stream: retried, Google's message in the console")
@@ -469,7 +524,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     wait_stage(page, "check", "fail")
     check("לא עבר את הבדיקות" in flow_msgs(page) and "הפרומפט מוכן" in flow_msgs(page) and "אין תרגילים" in flow_msgs(page),
           "lesson fails the checks: the failed checks are listed, copy-paste ready")
@@ -484,7 +539,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     wait_stage(page, "exercises", "fail")
     m = flow_msgs(page)
     check(stage_of(page, "write")[1] == "done" and "הסיפור נשמר" in m and "תקלה זמנית" in m and mock.count("exercises") == 2
@@ -507,7 +562,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     wait_stage(page, "review", "done")
     check(mock.count("write") == 2 and stage_of(page, "write")[1] == "done", "503 then OK: retried, flow goes on")
     ctx.close()
@@ -524,7 +579,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     wait_stage(page, "review", "done")
     texts = page.evaluate("__stageTexts")
     check(mock.count("write", MODEL) == 3 and mock.count("write", FALLBACK) == 0, "503 twice: third try works, main model only")
@@ -537,7 +592,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     wait_stage(page, "review", "done")
     fb = [x for x in mock.log if x["model"] == FALLBACK]
     check(mock.count("write", MODEL) == 4 and mock.count("write", FALLBACK) == 1, "503 four times on %s: switched to %s" % (MODEL, FALLBACK))
@@ -557,7 +612,7 @@ with sync_playwright() as p:
     page.evaluate("document.getElementById('autoCreate').click()")
     page.wait_for_timeout(300)
     new = mock.log[before:]
-    check(new and new[0]["kind"] == "write" and all(x["model"] == MODEL for x in new), "a new lesson starts with the main model again (%s)" % [(x["kind"], x["model"]) for x in new])
+    check(new and new[0]["kind"] == "ideas" and all(x["model"] == MODEL for x in new), "a new lesson starts with the main model again (%s)" % [(x["kind"], x["model"]) for x in new])
     ctx.close()
 
     mock, ctx, page = failing("503 on both models", [BUSY] * 8, "השרת של Google עמוס כרגע", 4 + 4)
@@ -570,7 +625,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     wait_stage(page, "review", "done")
     bodies = [x["body"]["generationConfig"] for x in mock.log if x["kind"] == "write"]
     check(len(bodies) == 2 and "thinkingConfig" in bodies[0] and "thinkingConfig" not in bodies[1],
@@ -583,7 +638,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page)
-    page.click("#autoCreate")
+    start_auto(page)
     wait_stage(page, "nikud", "wait")
     m = flow_msgs(page)
     check(stage_of(page, "review")[1] == "fail" and "בדיקת הטקסט האוטומטית נכשלה" in m and "יצירת פרומפט ביקורת" in m and mock.count("review") == 2,
@@ -603,7 +658,7 @@ with sync_playwright() as p:
     ctx = new_context(browser, mock)
     page = open_teacher(ctx, key=KEY)
     fill_form(page, nikud="none")
-    page.click("#autoCreate")
+    start_auto(page)
     page.wait_for_function("() => document.querySelector('#autoFlowMsgs').textContent.includes('מוכן לקישור')", timeout=15000)
     check("נסה ביקורת שוב" in flow_msgs(page) and "גם בלי בדיקת הטקסט" in flow_msgs(page), "no nikud: ready for a link, review retry still offered")
     ctx.close()
