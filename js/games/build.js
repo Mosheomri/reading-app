@@ -28,8 +28,10 @@
         var pos = 0;
         var mistakes = 0;
 
-        // An emoji this device cannot show is left out (the word itself is what the child builds).
-        var head = el('div', null, U.emojiShown(target.emoji) ? el('div', { class: 'big-emoji', 'aria-hidden': 'true' }, target.emoji) : null);
+        // The pictogram, else the emoji; no picture (or an emoji this device cannot show) is left out (the word
+        // itself is what the child builds, so the image has no alt).
+        var picture = window.Pics.node(target, { alt: '' });
+        var head = el('div', null, picture ? el('div', { class: 'big-emoji', 'aria-hidden': 'true' }, picture) : null);
         if (ctx.hasVoice) {
           head.appendChild(el('button', { type: 'button', class: 'btn quiet small', 'aria-label': 'השמעה',
             onclick: function () { ctx.speak(target.word); } }, '🔊'));

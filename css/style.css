@@ -566,7 +566,32 @@ textarea.open-answer { display: block; max-width: 640px; margin: 0 auto; font-si
 .nikud-check:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; border-radius: 4px; }
 .linkish { background: none; border: 0; padding: 0; color: var(--primary); text-decoration: underline; cursor: pointer; font: inherit; }
 .big-emoji .emoji-word { font-size: 1.4rem; letter-spacing: 0; }
-.chip .no-pic { font-size: .75rem; color: var(--muted, #666); border: 1px dashed currentColor; border-radius: 999px; padding: 0 6px; margin-inline-start: 6px; vertical-align: middle; }
+.chip .no-pic { font: inherit; font-size: .75rem; color: var(--muted); background: none; border: 1px dashed currentColor; border-radius: 999px; padding: 0 6px; margin-inline-start: 6px; vertical-align: middle; cursor: pointer; }
+.chip .no-pic:hover { color: var(--primary); }
+.chip-pic-btn { background: none; border: 0; padding: 0 2px; margin-inline-start: 4px; font-size: .85rem; cursor: pointer; opacity: .7; vertical-align: middle; }
+.chip-pic-btn:hover { opacity: 1; }
+
+/* Pictograms (ARASAAC, js/pics.js): a fixed size, relative to the emoji size around them. */
+img.pic { width: 1.2em; height: 1.2em; object-fit: contain; vertical-align: middle; }
+.chip img.pic { width: 1.6em; height: 1.6em; }
+.big-emoji img.pic { width: 1.5em; height: 1.5em; }
+.start-pics { font-size: 2.6rem; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 14px; }
+.start-pics img.pic { width: 1.6em; height: 1.6em; }
+.mcard img.pic { width: 72px; height: 72px; display: block; margin: auto; }
+.pic-btn img.pic { width: 22px; height: 22px; }
+.pic-dialog { width: min(520px, calc(100vw - 32px)); }
+.pic-dialog input[type=search] { flex: 1; min-width: 0; font-size: 1.1rem; }
+.pic-status.loading { color: var(--muted); }
+.pic-status.error { color: #b3261e; }
+.pic-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pic-choice { background: #fff; border: 2px solid var(--line); border-radius: 12px; padding: 6px; cursor: pointer; aspect-ratio: 1; }
+.pic-choice:hover, .pic-choice:focus-visible { border-color: var(--primary); }
+.pic-choice.selected { border-color: var(--good); }
+.pic-choice img { width: 100%; height: 100%; object-fit: contain; }
+.pic-credit { font-size: .75rem; color: var(--muted); text-align: center; margin: 16px 0 0; line-height: 1.4; }
+.pic-footer { padding: 0 16px; }
+.print-sheet .p-target img.pic { width: 12mm; height: 12mm; }
+.print-sheet .pic-credit { font-size: 8pt; color: #000; margin-top: 6mm; }
 .second-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .second-bar strong { margin-inline-end: auto; }
 .second-status { margin: 10px 0; }

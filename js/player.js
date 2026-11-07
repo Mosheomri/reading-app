@@ -12,6 +12,7 @@
   var GAME_ORDER = ['memory', 'build', 'listen'];
 
   var stage = document.getElementById('stage');
+  var Pics = window.Pics;
   var progressFill = document.getElementById('progressFill');
   var navBar = document.getElementById('nav');
   var navPrev = document.getElementById('navPrev');
@@ -122,14 +123,16 @@
     var s = screen();
     s.appendChild(el('div', { class: 'celebrate', 'aria-hidden': 'true' }, '📖'));
     s.appendChild(el('h1', null, R.text(lesson, lesson.title) || 'שיעור קריאה'));
-    // An emoji this device cannot show is replaced by its word; a word with no emoji is left out (no empty place).
-    var withEmoji = lesson.targetWords.filter(function (t) { return t.emoji; });
-    if (withEmoji.length) {
-      s.appendChild(el('div', { class: 'big-emoji', style: 'font-size:2.6rem;letter-spacing:6px', 'aria-hidden': 'true' },
-        withEmoji.map(function (t, i) {
-          var shown = U.emojiShown(t.emoji);
-          return [i ? ' ' : '', shown ? t.emoji : el('span', { class: 'emoji-word' }, R.text(lesson, t.word))];
-        })));
+    // A pictogram (js/pics.js), else the emoji; an emoji this device cannot show is replaced by its word; a word
+    // with no picture is left out (no empty place). A pictogram that does not load falls back the same way.
+    var withPic = lesson.targetWords.filter(function (t) { return Pics.valid(t.pic) || t.emoji; });
+    if (withPic.length) {
+      var emojiOrWord = function (t) {
+        if (!t.emoji) return null;
+        return U.emojiShown(t.emoji) ? el('span', { class: 'emoji' }, t.emoji) : el('span', { class: 'emoji-word' }, R.text(lesson, t.word));
+      };
+      s.appendChild(el('div', { class: 'big-emoji start-pics', 'aria-hidden': 'true' },
+        withPic.map(function (t) { return Pics.valid(t.pic) ? Pics.node(t, { fallback: emojiOrWord }) : emojiOrWord(t); })));
     }
     s.appendChild(el('p', { class: 'lead' }, 'נשחק, נקרא סיפור ונענה על שאלות'));
     s.appendChild(el('div', { class: 'stage-actions' },
@@ -271,6 +274,12 @@
     lesson.exercises = lesson.exercises.filter(function (ex) { return !ex.unknown; });
     lesson.targetWords = lesson.targetWords.filter(function (t) { return t.word; });
     progressFill.parentNode.hidden = false;
+    // The ARASAAC credit, at the bottom of every screen, when the lesson has a pictogram.
+    var credit = document.getElementById('picCredit');
+    U.clear(credit);
+    var line = Pics.credit(lesson);
+    if (line) credit.appendChild(line);
+    credit.hidden = !line;
     document.title = (R.text(lesson, lesson.title) || 'שיעור קריאה');
 
     U.speechReady().then(function (hasVoice) {

@@ -6,6 +6,7 @@
   var U = window.Util;
   var L = window.Lesson;
   var R = window.Render;
+  var Pics = window.Pics;
   var el = U.el;
 
   var STORE_SETTINGS = 'readingApp.settings';
@@ -459,6 +460,7 @@
       twBox.appendChild(el('div', { class: 'tw-row' },
         textInput(t.word, function (v) { t.word = v; }, { 'aria-label': 'מילת יעד ' + (i + 1) }),
         textInput(t.emoji, function (v) { t.emoji = v; }, { class: 'emoji', 'aria-label': 'אימוג׳י' }),
+        picButton(t),
         removeBtn('מחיקת מילה', function () { lesson.targetWords.splice(i, 1); changed(true); })));
     });
     if (lesson.targetWords.length < 10) {
@@ -681,9 +683,15 @@
     var p = U.clear($('preview'));
     p.appendChild(el('h2', { style: 'text-align:center' }, slotText(lesson, 'title', lesson.title, mark)));
     p.appendChild(el('div', { class: 'target-chips' }, lesson.targetWords.map(function (t, i) {
-      // No emoji: a small "אין ציור" mark, so the teacher can add one by hand.
-      return el('span', { class: 'chip' }, U.emojiShown(t.emoji) ? t.emoji + ' ' : null, slotText(lesson, 'targetWords[' + i + '].word', t.word, mark),
-        t.emoji ? null : el('span', { class: 'no-pic', title: 'אפשר להוסיף אימוג׳י בעריכה' }, 'אין ציור'));
+      // The pictogram, else the emoji. No picture at all: the small "אין ציור" mark is a button that opens the
+      // choice of a picture; otherwise a small 🖼️ button next to the word does.
+      var picture = window.Pics.node(t);
+      var none = !Pics.valid(t.pic) && !t.emoji;
+      return el('span', { class: 'chip' }, picture, picture ? ' ' : null, slotText(lesson, 'targetWords[' + i + '].word', t.word, mark),
+        none
+          ? el('button', { type: 'button', class: 'no-pic', title: 'בחרו ציור', onclick: function () { openPicDialog(t); } }, 'אין ציור')
+          : el('button', { type: 'button', class: 'chip-pic-btn', title: 'בחרו ציור', 'aria-label': 'בחרו ציור ל' + t.word,
+            onclick: function () { openPicDialog(t); } }, '🖼️'));
     })));
     var second = secondBox(true);
     if (second) p.appendChild(second);
@@ -696,6 +704,84 @@
       if (ex.unknown) return;
       p.appendChild(exercisePreview(lesson, ex, i, mark));
     });
+    var credit = Pics.credit(lesson);
+    if (credit) p.appendChild(credit);
+  }
+
+  /* ---------- Pictures for the target words (ARASAAC, js/pics.js) ---------- */
+
+  // "🖼️ בחרו ציור" next to a target word in the editor; with a pictogram, its small image.
+  function picButton(t) {
+    var id = Pics.valid(t.pic);
+    return el('button', { type: 'button', class: 'btn small pic-btn', 'aria-label': 'בחרו ציור ל' + (t.word || 'מילה'),
+      onclick: function () { openPicDialog(t); } },
+      id ? el('img', { class: 'pic', src: Pics.url(id), alt: '' }) : '🖼️', ' בחרו ציור');
+  }
+
+  // The choice of a picture for a target word: search ARASAAC with the word without nikud (bestsearch, then
+  // search), up to 6 pictures; a search box for another wording; "בלי ציור" and "חזרה לאימוג׳י". The teacher
+  // always chooses; nothing is picked automatically. If ARASAAC cannot be reached, the lesson works as before.
+  function openPicDialog(t) {
+    var old = $('picDialog');
+    if (old) old.remove();
+    var status = el('p', { class: 'pic-status small', role: 'status' });
+    var grid = el('div', { class: 'pic-grid' });
+    var query = el('input', { type: 'search', value: H.stripNikud(t.word || '').trim(), lang: 'he', id: 'picQuery',
+      'aria-label': 'חיפוש ציור', placeholder: 'למשל ביחיד או בלי תחילית' });
+    var seq = 0;
+    function done(apply) {
+      apply();
+      dlg.close();
+      changed(true);
+    }
+    function search() {
+      var text = query.value.trim();
+      var my = ++seq;
+      U.clear(grid);
+      if (!text) { status.textContent = 'כתבו מילה לחיפוש.'; status.className = 'pic-status small'; return; }
+      status.textContent = 'מחפשים ציורים…';
+      status.className = 'pic-status small loading';
+      Pics.search(text).then(function (ids) {
+        if (my !== seq) return;
+        if (!ids.length) {
+          status.textContent = 'לא נמצאו ציורים ל"' + text + '". נסו ניסוח אחר (למשל ביחיד או בלי תחילית).';
+          status.className = 'pic-status small';
+          return;
+        }
+        status.textContent = 'בחרו ציור:';
+        status.className = 'pic-status small';
+        ids.forEach(function (id) {
+          var img = el('img', { src: Pics.url(id), alt: text + ' (' + id + ')', loading: 'lazy' });
+          var b = el('button', { type: 'button', class: 'pic-choice' + (Pics.valid(t.pic) === id ? ' selected' : ''),
+            'data-id': String(id), onclick: function () { done(function () { t.pic = id; }); } }, img);
+          img.addEventListener('error', function () { b.remove(); });
+          grid.appendChild(b);
+        });
+      }, function () {
+        if (my !== seq) return;
+        status.textContent = 'ספריית הציורים ARASAAC לא זמינה כרגע. אפשר לנסות שוב מאוחר יותר; השיעור עובד גם בלי ציורים.';
+        status.className = 'pic-status small error';
+      });
+    }
+    query.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); search(); } });
+    var dlg = el('dialog', { class: 'nikud-dialog pic-dialog', id: 'picDialog', 'aria-label': 'בחירת ציור' },
+      el('h3', { style: 'margin-top:0' }, 'ציור למילה "' + (t.word || '') + '"'),
+      el('div', { class: 'row' }, query, el('button', { type: 'button', class: 'btn small primary', id: 'picSearch', onclick: search }, 'חיפוש')),
+      status,
+      grid,
+      el('div', { class: 'row', style: 'margin-top:12px' },
+        el('button', { type: 'button', class: 'btn small', id: 'picNone', onclick: function () {
+          done(function () { delete t.pic; t.emoji = ''; });
+        } }, 'בלי ציור'),
+        t.emoji && Pics.valid(t.pic) ? el('button', { type: 'button', class: 'btn small', id: 'picEmoji', onclick: function () {
+          done(function () { delete t.pic; });
+        } }, 'חזרה לאימוג׳י ' + t.emoji) : null,
+        el('button', { type: 'button', class: 'btn small quiet', onclick: function () { dlg.close(); } }, 'ביטול')),
+      el('p', { class: 'muted small', style: 'margin:10px 0 0' }, 'הציורים מ-ARASAAC (arasaac.org), ברישיון CC BY-NC-SA.'));
+    dlg.addEventListener('close', function () { if (dlg.isConnected) dlg.remove(); });
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    search();
   }
 
   // Joins the one-sentence lines of the story into paragraphs (the button on the "lines" warning).

@@ -51,7 +51,8 @@ with sync_playwright() as p:
     page.evaluate("(l) => localStorage.setItem('readingApp.draft', JSON.stringify({lesson: l, request: null, nikudVerified: null}))", lesson)
     page.reload()
     page.click("#resumeDraft")
-    chips = page.eval_on_selector_all("#preview .chip", "els => els.map(e => e.textContent.trim())")
+    # The text of each chip without its buttons (🖼️ / אין ציור)
+    chips = page.eval_on_selector_all("#preview .chip", "els => els.map(e => { const c = e.cloneNode(true); c.querySelectorAll('button').forEach(b => b.remove()); return c.textContent.trim(); })")
     check(MISSING not in chips[0] and chips[0] == page.evaluate("(w) => Render.text({nikudMode: 'full', targetWords: []}, w)", word0)
           and chips[1].startswith(lesson["targetWords"][1]["emoji"]), "teacher preview: the word alone for that emoji, the others as before (%s)" % chips[:2])
 

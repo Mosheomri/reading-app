@@ -24,6 +24,9 @@
         var choices = U.shuffle([target].concat(others));
         var solved = false;
 
+        // The heard word's picture (pictogram, else emoji; none: nothing) helps; the child still reads to choose.
+        var picture = window.Pics.node(target, { alt: '' });
+        if (picture) area.appendChild(el('div', { class: 'big-emoji', 'aria-hidden': 'true' }, picture));
         area.appendChild(el('button', { type: 'button', class: 'btn primary speak-btn', 'aria-label': 'השמעה שוב',
           onclick: function () { ctx.speak(target.word); } }, '🔊'));
 

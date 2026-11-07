@@ -191,7 +191,9 @@
       el('span', null, 'תאריך: ', el('span', { class: 'p-fill short' }))));
     sheet.appendChild(el('h1', { class: 'p-title' }, R.text(lesson, lesson.title)));
     sheet.appendChild(el('div', { class: 'p-targets' }, lesson.targetWords.filter(function (tw) { return tw.word; }).map(function (tw) {
-      return el('span', { class: 'p-target' }, window.Util.emojiShown(tw.emoji) ? tw.emoji + ' ' : '', R.text(lesson, tw.word));
+      // The pictogram, else the emoji, else the word alone.
+      var picture = window.Pics.node(tw, { alt: '' });
+      return el('span', { class: 'p-target' }, picture, picture ? ' ' : '', R.text(lesson, tw.word));
     })));
     sheet.appendChild(el('div', { class: 'story p-story' }, R.story(lesson)));
     if (items.length) {
@@ -203,6 +205,9 @@
         el('h2', null, 'דף תשובות' + (lesson.title ? ': ' + R.text(lesson, lesson.title) : '')),
         el('ol', null, items.map(function (item) { return el('li', { value: item.number }, answer(lesson, item)); }))));
     }
+    // The ARASAAC credit when the lesson has a pictogram.
+    var credit = window.Pics.credit(lesson);
+    if (credit) sheet.appendChild(credit);
     return sheet;
   }
 

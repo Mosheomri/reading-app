@@ -241,7 +241,11 @@
       targetWords: raw.targetWords.map(function (t) {
         if (typeof t === 'string') return { word: str(t), emoji: '' };
         t = t || {};
-        return { word: str(t.word || t.text), emoji: str(t.emoji) };
+        var out = { word: str(t.word || t.text), emoji: str(t.emoji) };
+        // Optional ARASAAC pictogram id (js/pics.js), chosen by the teacher; shown before the emoji.
+        var pic = picId(t.pic);
+        if (pic) out.pic = pic;
+        return out;
       }),
       story: cleanStory.text.replace(/\r\n?/g, '\n').trim(),
       exercises: raw.exercises.map(coerceExercise)
@@ -563,6 +567,12 @@
 
   /* ---------- Link encode / decode ---------- */
 
+  // An ARASAAC pictogram id: a positive whole number (also as digits in a string), else 0.
+  function picId(v) {
+    var n = typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? Number(v) : v;
+    return typeof n === 'number' && isFinite(n) && n > 0 && Math.floor(n) === n ? n : 0;
+  }
+
   function clean(lesson) {
     var out = {
       version: 1,
@@ -574,7 +584,13 @@
     // Only an informational text says so: a story (the default) stays exactly as before, so links and the
     // print sheet's shuffle (seeded with this JSON) do not change.
     if (lesson.genre === 'info') out.genre = 'info';
-    out.targetWords = lesson.targetWords.map(function (t) { return { word: t.word, emoji: t.emoji }; });
+    // `pic` only when there is one: a lesson with no pictogram encodes exactly as before.
+    out.targetWords = lesson.targetWords.map(function (t) {
+      var o = { word: t.word, emoji: t.emoji };
+      var pic = picId(t.pic);
+      if (pic) o.pic = pic;
+      return o;
+    });
     out.story = lesson.story;
     out.exercises = lesson.exercises.filter(function (ex) { return !ex.unknown; });
     return out;
@@ -602,6 +618,7 @@
     extractJson: extractJson,
     coerce: coerce,
     coercePlan: coercePlan,
+    picId: picId,
     check: check,
     sortOrderExercises: sortOrderExercises,
     unvocalizedWords: unvocalizedWords,

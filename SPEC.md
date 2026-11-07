@@ -16,6 +16,12 @@ then sends the child a link. The child plays, reads and answers – **no AI, no 
 - **The lesson lives inside the link**: lesson JSON → compressed with LZ-String
   (`compressToEncodedURIComponent`) → placed in the URL **hash**: `play.html#<data>`.
   The hash is never sent to any server, so no data about the child or lesson is stored anywhere.
+- **Outside servers the child page loads from**: the fonts (Google Fonts), and, only when the lesson has a
+  pictogram (`pic`, section 4.1), its images from ARASAAC's image server (`static.arasaac.org`): the browser asks
+  for each picture by its number, so ARASAAC sees the child's IP address and which pictograms are loaded (not
+  the lesson, the hash or anything the child does). The page sends no referrer (`<meta name="referrer"
+  content="no-referrer">`). The teacher page also calls ARASAAC's search API (`api.arasaac.org`) with the words
+  the teacher searches for, only when she opens the choice of a picture.
 - **Logo**: `assets/logo.png` is the original (1824 × 862, ~900 KB, white background), not loaded by the site.
   `assets/logo-web.png` is made from it (margins trimmed, white made transparent, 720 px wide, 128 colors,
   ~20 KB) and shown at the top of the teacher page and both setup pages (there it links to the teacher page;
@@ -270,6 +276,16 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   flow also lists the ideas that were offered, the chosen one in bold with ✓). Hidden
   otherwise (a loaded file or draft has none).
 - Everything editable: story text (including nikud), target words, emojis, questions, options, answers.
+- **A picture for a target word** (ARASAAC, `js/pics.js`): a "🖼️ בחרו ציור" button next to each target word in
+  the editor (with the chosen pictogram small on it), and in the preview a small 🖼️ button on each chip; on a
+  chip with no picture the "אין ציור" mark is that button. It opens a dialog (`#picDialog`) that searches
+  `Pics.search(word without nikud)`: `…/v1/pictograms/he/bestsearch/{text}`, and if that finds nothing,
+  `…/search/{text}` (a 404 means nothing found); up to 6 pictures (`MAX_RESULTS`), in ARASAAC's order. A search
+  box for another wording (singular, without a prefix; Enter or "חיפוש"). Buttons: "בלי ציור" (no pictogram and
+  no emoji), "חזרה לאימוג׳י {emoji}" (only for a word with a pictogram and an emoji), "ביטול". States: "מחפשים
+  ציורים…", "לא נמצאו ציורים…", and when ARASAAC cannot be reached "ספריית הציורים ARASAAC לא זמינה כרגע…" —
+  nothing else changes, the lesson works as before. **Nothing is chosen automatically**: only the teacher's
+  click on a picture sets `pic`. A result whose image does not load is left out of the grid.
 - Highlight target words in the story.
 - The lesson usually has no nikud yet at this point (section 7). The preview says so as an info message
   (not a warning) when the nikud mode is full or partial. Words without nikud are marked in red only once
@@ -392,7 +408,8 @@ Automatic with a saved Gemini key; **by hand always** (below), also without a ke
   draft (`second`).
 - **Tests**: `tests/nikud_second.py`, against a mock API; `tests/nikud_manual.py` (the manual way, and the
   manual way offered when the automatic check fails on quota); `tests/renikud.py` (only the changed lines, with
-  the Dicta bridge mock); `tests/emoji.py`.
+  the Dicta bridge mock); `tests/emoji.py`; `tests/pics.py` (pictograms, against a mock ARASAAC, plus one real
+  search for "שולחן" that also checks CORS and that the image loads).
 
 #### 3.1 Automatic nikud: the Dicta bridge
 A Tampermonkey userscript, `userscripts/dicta-bridge.user.js`, runs on `https://nakdan.dicta.org.il/*` and
@@ -483,7 +500,8 @@ talks with the teacher page (`js/dicta.js`) through `window.postMessage`.
   into a hidden `#printArea` on the teacher page and calls `window.print()`. A print stylesheet shows only that
   area: A4 (`@page`), large font (text 16pt, story 18pt, line height 2 for nikud), black borders instead of
   backgrounds (browsers skip backgrounds when printing).
-  - Content: a "שם: ___ תאריך: ___" line, the title, the target words with their emoji, the story (target words
+  - Content: a "שם: ___ תאריך: ___" line, the title, the target words with their picture (pictogram, else
+    emoji; printing waits for the images like the logo), the ARASAAC credit at the end when there is a pictogram, the story (target words
     bold and underlined), then the exercises, numbered, each with a short instruction:
     `mcq` – options with a circle to mark; `tf` – "נכון" / "לא נכון" with squares; `fill` – the sentence with a
     blank line and a word bank (dashed frame) of its options; `order` – the sentences shuffled, with a box for
@@ -532,10 +550,26 @@ A target word may have **no emoji** (the AI leaves the field empty when no emoji
 the teacher may also clear it): no picture and no empty place anywhere. The start page leaves the word out of its
 emoji row (no row at all if no word has an emoji); the build game shows no picture; print shows the word alone;
 the teacher preview adds a small dashed mark "אין ציור" to its chip (`.no-pic`), so the teacher can add one by hand.
-1. **זוגות (Memory)** – cards: word ↔ emoji. Flip two, match pairs. A word with no emoji (or one this device cannot
-   show) is a word-word pair: the same word on both cards (both read aloud when flipped).
+**Pictograms** (`js/pics.js`, `window.Pics`): a target word with `pic` shows the ARASAAC image
+`https://static.arasaac.org/pictograms/{id}/{id}_300.png` (`Pics.url`) instead of its emoji, at a fixed size
+(`img.pic`, sized in `em` like the emoji around it; 72px on a memory card, 12mm in print), with the word as
+`alt` (empty `alt` where the word itself is the task: build, listen, print). `Pics.node(t)` gives the picture
+of a word: the pictogram, else the emoji (if this device shows it), else null. **An image that does not load**
+(`error`) is replaced by the emoji, and with no emoji by nothing, like a word with no emoji (start page: left
+out; memory: a word-word pair). Everywhere: the start page, memory, build, listen, the teacher preview, print.
+**Credit** (`Pics.credit`, only when the lesson has at least one `pic`): a small line at the bottom of the child
+page (`#picCredit`, under every screen), at the end of the print sheet and under the teacher's preview — the
+official wording of ARASAAC's terms of use ("How to cite the ARASAAC license": "The pictographic symbols used are
+the property of the Government of Aragón and have been created by Sergio Palao for ARASAAC
+(http://www.arasaac.org), that distributes them under Creative Commons License BY-NC-SA"), in Hebrew
+(`Pics.CREDIT`), with a link to the license.
+1. **זוגות (Memory)** – cards: word ↔ picture (pictogram or emoji). Flip two, match pairs. A word with no
+   picture (or an emoji this device cannot show, or a pictogram that does not load and no emoji) is a word-word
+   pair: the same word on both cards (both read aloud when flipped).
 2. **הרכבת מילה** – letters of a target word shuffled (with nikud attached to each letter as written); child taps letters in order.
 3. **שומעים ובוחרים** – the word is read aloud (Web Speech API, `he-IL`); child picks it from 3–4 target words.
+   The heard word's picture (pictogram or emoji, as in the build game) is shown above the 🔊 button; the
+   options are words only.
    If no Hebrew voice is available on the device, skip this game silently.
 
 Child can replay a game ("↻ שוב", after it ends) or move on with "הבא" at any time.
@@ -631,7 +665,7 @@ in order, "כבר עניתם נכון ✓"); it takes no clicks and the score do
   "nikudMode": "full",
   "level": "1-2",
   "targetWords": [
-    { "word": "כֶּלֶב", "emoji": "🐕" },
+    { "word": "כֶּלֶב", "emoji": "🐕", "pic": 7202 },
     { "word": "גִּנָּה", "emoji": "🌳" }
   ],
   "story": "full story text, fully vocalized, paragraphs separated by \n",
@@ -656,6 +690,11 @@ Rules:
 - `genre`: `"story"` or `"info"` (an informational text). Missing or anything else (lessons made before it):
   a story. `Lesson.clean` (links, JSON files, the print sheet's seed) writes it only for `"info"`, so a story's
   data is exactly as before. The child page does not use it.
+- `targetWords[].pic` (optional): an ARASAAC pictogram id, a positive whole number (digits in a string are
+  accepted; anything else is dropped by `Lesson.coerce` / `Lesson.picId`). Chosen by the teacher (section 3, step
+  4), never by the AI. `Lesson.clean` writes it only when there is one, so a lesson without pictograms encodes
+  exactly as before; old lessons and links have none and show their emoji as before. What is shown: `pic`,
+  else `emoji`, else no picture (section 4.1).
 - `order.sentences` is stored in the correct order; the player shuffles.
 - `open`: a question and a sample answer (`sampleAnswer`). There is no right or wrong.
 - `locate`: a question and the sentence of the story that answers it (`sentence`, matched without nikud and
@@ -810,7 +849,7 @@ Source of nikud: Dicta Nakdan, by copy-paste in step 5 (no API call, so the site
 - Nikud verification layer: verified word dictionary (JSON) + deterministic comparison, coloring words green / red / gray; homographs flagged for review, not as errors.
 - Direct (API) integration with Dicta Nakdan instead of copy-paste.
 - Word-search game, printable worksheet, custom GPT / Gemini Gem for teachers.
-- Pictograms from ARASAAC for words with no exact emoji (researched 2026-11, not built). The API needs no key:
+- (Built: pictograms from ARASAAC, sections 3 step 4, 4.1 and 5. The research notes:) The API needs no key:
   search `https://api.arasaac.org/v1/pictograms/he/bestsearch/{word}` (also `/search/`; `he` is a supported
   locale; JSON `[{_id, keywords: [{keyword, plural}], …}]`, e.g. שולחן → 3129); image
   `https://static.arasaac.org/pictograms/{id}/{id}_300.png` or `https://api.arasaac.org/v1/pictograms/{id}`

@@ -1,4 +1,4 @@
-/* Game: memory pairs, word ↔ emoji (a word with no emoji: word ↔ the same word). */
+/* Game: memory pairs, word ↔ picture (pictogram or emoji; a word with no picture: word ↔ the same word). */
 (function () {
   'use strict';
 
@@ -16,10 +16,11 @@
       var pairs = U.shuffle(ctx.targets).slice(0, MAX_PAIRS);
       var cards = [];
       pairs.forEach(function (t, id) {
-        // No emoji, or one this device cannot show: a word-word pair (the same word on both cards).
-        var pic = U.emojiShown(t.emoji);
-        cards.push({ id: id, kind: pic ? 'emoji' : 'word', label: pic ? t.emoji : ctx.show(t.word), word: t.word });
-        cards.push({ id: id, kind: 'word', label: ctx.show(t.word), word: t.word });
+        // A pictogram, else the emoji. No picture (or one this device cannot show): a word-word pair (the same
+        // word on both cards). A pictogram that does not load falls back to the emoji, then to the word.
+        var pic = window.Pics.has(t);
+        cards.push({ id: id, kind: pic ? 'pic' : 'word', word: t.word, t: t });
+        cards.push({ id: id, kind: 'word', word: t.word, t: t });
       });
       cards = U.shuffle(cards);
 
@@ -29,9 +30,18 @@
       var grid = el('div', { class: 'memory' });
 
       cards.forEach(function (card) {
+        var face = el('span', { class: 'face' });
         var btn = el('button', { type: 'button', class: 'mcard' + (card.kind === 'word' ? ' word' : ''), 'aria-label': 'קלף' },
-          el('span', { class: 'back', 'aria-hidden': 'true' }, '?'),
-          el('span', { class: 'face' }, card.label));
+          el('span', { class: 'back', 'aria-hidden': 'true' }, '?'), face);
+        var asWord = function () {
+          card.kind = 'word';
+          btn.classList.add('word');
+          return document.createTextNode(ctx.show(card.word));
+        };
+        var picture = card.kind === 'pic' && window.Pics.node(card.t, {
+          fallback: function (t) { return U.emojiShown(t.emoji) ? el('span', { class: 'emoji' }, t.emoji) : asWord(); }
+        });
+        if (picture) face.appendChild(picture); else face.appendChild(asWord());
         card.btn = btn;
         btn.addEventListener('click', function () { flip(card); });
         grid.appendChild(btn);
