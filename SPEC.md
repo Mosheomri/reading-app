@@ -112,12 +112,12 @@ length), `language` (vocabulary and style, every kind of text), `story` (charact
 `avoid` (what not to write at this level), and `questions` (the kind of comprehension questions).
 `Levels.textLines(level, genre)` gives `language` plus, for a story, `story`.
 
-| Level | id | Sentences | Language | Avoid | Questions |
+| Level | id | Sentences (in words, not numbers) | Language | Avoid | Questions |
 |---|---|---|---|---|---|
-| גן–תחילת א׳ | `k-1` | 3–6 words, joined with ו / אז / כי | words from the young child's world; deliberate repetition of a phrase; one tense; 1–2 characters with short names, one-line dialogue | abstract words, multi-part sentences, jumps in time or place | only direct |
-| סוף א׳–ב׳ | `1-2` | 4–8 words, varied | familiar words; joined with ו, כי, אבל, אז, כש-; few descriptions; some repetition; clear dialogue | abstract or rare words, more than two clauses, jumps | direct + one simple comprehension question |
-| ג׳–ד׳ | `3-4` | 6–12 words, varied | wider vocabulary explained by context; ש, כש, כי, אבל, לכן; more description; dialogue that moves the plot | jargon, high literary language, an explicit moral | one inference question |
-| ה׳–ו׳ | `5-6` | 8–15 words, with short ones | rich vocabulary but a children's book; connectives; vivid description (show, don't tell); complex feelings | high or archaic language, jargon, an explicit moral | two inference questions |
+| גן–תחילת א׳ | `k-1` | very short, joined with ו / אז / כי | words from the young child's world; deliberate repetition of a phrase; one tense; 1–2 characters with short names, one-line dialogue | abstract words, multi-part sentences, jumps in time or place | only direct |
+| סוף א׳–ב׳ | `1-2` | usually short, varied | familiar words; joined with ו, כי, אבל, אז, כש-; few descriptions; some repetition; clear dialogue | abstract or rare words, more than two clauses, jumps | direct + one simple comprehension question |
+| ג׳–ד׳ | `3-4` | medium length, varied | wider vocabulary explained by context; ש, כש, כי, אבל, לכן; more description; dialogue that moves the plot | jargon, high literary language, an explicit moral | one inference question |
+| ה׳–ו׳ | `5-6` | medium to long, with short ones | rich vocabulary but a children's book; connectives; vivid description (show, don't tell); complex feelings | high or archaic language, jargon, an explicit moral | two inference questions |
 
 The settings form and the editor list the levels from this file. The chosen level is saved with the teacher's
 settings and in the lesson (`level`); the editor can change it. The review prompt (step 5) asks the second AI to
@@ -165,6 +165,10 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   the page (⏳ active, ✓ done, ✕ failed, 👆 the teacher's turn, – skipped). The principle: like an author, first an
   idea, then a plan, and only then the writing. The teacher's turns (the cards and the outline) are shown in the
   flow's panel under the stage list (`#autoPlan`), scrolled into view.
+  **"מצב מהיר"** (a checkbox under the buttons, shown with a key, remembered in `localStorage`
+  `readingApp.fastMode`, off by default): the first idea is chosen ("נבחר אוטומטית: …") and the outline approved
+  ("המתווה אושר אוטומטית (מצב מהיר)") with no stop; an outline that fails the checks of step 4 is still shown to
+  the teacher. The ideas and the outline are shown in the preview (step 4) either way.
   1. **מחפש רעיונות…** (`buildIdeasPrompt(settings, avoid)`, `Gemini.storyIdeas`, `story-ideas`): 3 ideas. For a
      story, each has a title, the main character and her name, what she wants, what gets in her way, how it ends
      (2–3 sentences), and how each target word fits naturally (`words: [{word, use}]`). If the AI chooses the
@@ -173,8 +177,8 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   2. **👆 בחרו רעיון**: 3 cards, each with "בחירה". "🔄 3 רעיונות חדשים" calls again with the titles of every idea
      shown so far (`avoid`: "אל תחזור על הרעיונות שכבר הוצעו"). "✍️ רעיון משלי" opens a free-text box ("תכנון לפי
      הרעיון שלי"; empty: "כתבו את הרעיון."). Informational text: "זווית" instead of "רעיון".
-  3. **מתכנן את המתווה…** (`buildPlanPrompt(settings, idea)`, `Gemini.planStory`, `story-plan`): an outline of 4–6
-     scenes (`Prompt.SCENES`): for each, what happens, the feeling and which target words appear, and the length
+  3. **מתכנן את המתווה…** (`buildPlanPrompt(settings, idea)`, `Gemini.planStory`, `story-plan`): an outline of
+     scenes, how many by the length (`Prompt.sceneRange`: up to 80 words 2–3, up to 250 3–5, longer 4–6): for each, what happens, the feeling and which target words appear, and the length
      split between them (each scene's `length`, summing to about the requested length); also the title and the
      target words with their emoji. The structure rules of the kind of text are here. Target words: the teacher's
      list, else the chosen idea's words, else (her own idea) the AI chooses them. Informational text: subtopics
@@ -252,7 +256,8 @@ check that the text fits the lesson's level, and to report mismatches as `style`
 ### Step 4: Preview & edit
 - Show the full lesson exactly as the child will see it.
 - Above the preview, folded: "📝 התכנון של הבינה (לא נשמר בשיעור)" with the idea and the scenes (feeling or facts,
-  words, length), when the answer had a plan (pasted, or the automatic flow's outline as approved). Hidden
+  words, length), when the answer had a plan (pasted, or the automatic flow's outline as approved; the automatic
+  flow also lists the ideas that were offered, the chosen one in bold with ✓). Hidden
   otherwise (a loaded file or draft has none).
 - Everything editable: story text (including nikud), target words, emojis, questions, options, answers.
 - Highlight target words in the story.
@@ -684,7 +689,7 @@ length ("בערך N מילים. סטייה של עד 20% (בין 0.8·N ל-1.2·
 
 תכנון (בשדה plan, לפני הסיפור):
 - idea: the idea in 2–3 sentences (character and name, wish, obstacle, ending) | the angle (informational)
-- scenes: an outline of 4–6 scenes in order (what, feeling | what = subtopic, facts), words, length (sum ≈ N)
+- scenes: an outline of 2–3 / 3–5 / 4–6 scenes (by the length, as in the automatic flow) in order (what, feeling | what = subtopic, facts), words, length (sum ≈ N)
 מבנה הסיפור: {named main character with a wish or problem; attempts, climax, resolution; beginning, middle and
  end; consistent place and time; every sentence moves the plot; short dialogue welcome; a story only}
 | מבנה הטקסט המידעי: {one topic; an opening sentence; a paragraph per subtopic; a closing sentence; no plot and

@@ -171,8 +171,12 @@
     ];
   }
 
-  // How many scenes (or subtopics) the outline has.
-  var SCENES = { min: 4, max: 6 };
+  // How many scenes (or subtopics) the outline has, by the length asked for: a short text has fewer parts.
+  function sceneRange(length) {
+    if (length <= 80) return { min: 2, max: 3 };
+    if (length <= 250) return { min: 3, max: 5 };
+    return { min: 4, max: 6 };
+  }
 
   var EMOJI_LINE = '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה. רק אימוג׳י נפוץ וותיק שמוצג בכל מכשיר (כמו 🐶 🌳 ⚽ 🏠 🍎): ' +
     'בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.';
@@ -192,7 +196,8 @@
 
   // The outline's fields, for the plan call and the plan field of the copy-paste prompt.
   function sceneLines(settings, genre) {
-    var range = SCENES.min + ' עד ' + SCENES.max;
+    var r = sceneRange(settings.length);
+    var range = r.min + ' עד ' + r.max;
     var lines = genre === 'info'
       ? ['- scenes: מתווה של ' + range + ' תתי-נושאים, לפי הסדר בטקסט. לכל תת-נושא:',
          '  - what: תת-הנושא.',
@@ -327,7 +332,7 @@
     return lines.join('\n');
   }
 
-  // Second call: an outline of 4–6 scenes (subtopics) for the chosen idea, with the target words and their emoji.
+  // Second call: an outline of scenes (subtopics; how many by the length, sceneRange) for the chosen idea, with the target words and their emoji.
   // idea: a card from buildIdeasPrompt's answer, or {own: the teacher's own idea}.
   function buildPlanPrompt(settings, idea) {
     var level = levelOf(settings.level);
@@ -489,6 +494,6 @@
   window.buildEditPrompt = buildEditPrompt;
   window.buildExercisesPrompt = buildExercisesPrompt;
   window.storyShape = storyShape;
-  window.Prompt = { LENGTH_SLACK: LENGTH_SLACK, SCENES: SCENES, languageLines: languageLines, GENRE_LINES: GENRE_LINES,
+  window.Prompt = { LENGTH_SLACK: LENGTH_SLACK, sceneRange: sceneRange, languageLines: languageLines, GENRE_LINES: GENRE_LINES,
     ideaText: ideaText, ideaWords: ideaWords };
 })();

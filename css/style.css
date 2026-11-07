@@ -720,6 +720,8 @@ code.addr { direction: ltr; unicode-bidi: isolate; background: #f6f2ea; border-r
 .idea-card .row { margin-top: auto; padding-top: 8px; }
 .idea-words { margin: 4px 0 0; padding-inline-start: 18px; font-size: 0.9rem; color: var(--muted); }
 .own-idea { margin-top: 12px; }
+.fast-mode { margin-top: 10px; }
+.plan-view .chosen { font-weight: 600; }
 .own-idea label, .plan-field > span { display: block; font-weight: 600; margin-bottom: 4px; }
 .plan-field { display: block; margin-bottom: 10px; }
 .plan-scenes { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 10px; }

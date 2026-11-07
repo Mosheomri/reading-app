@@ -10,6 +10,7 @@
 
   var STORE_SETTINGS = 'readingApp.settings';
   var STORE_DRAFT = 'readingApp.draft';
+  var STORE_FAST = 'readingApp.fastMode'; // "מצב מהיר": the first idea and the outline are approved automatically
   var MAX_STORY_WORDS = 2000;
   var LONG_LINK = 8000; // characters; above this the link step suggests checking it before sending
 
@@ -353,6 +354,13 @@
     var body = U.clear($('planViewBody'));
     if (!plan) return;
     var info = window.Levels.genre(state.lesson && state.lesson.genre) === 'info';
+    // The automatic flow's ideas (the chosen one in bold), so they can be seen also in fast mode.
+    if (plan.ideas && plan.ideas.length) {
+      body.appendChild(el('p', null, el('strong', null, info ? 'הזוויות שהוצעו:' : 'הרעיונות שהוצעו:')));
+      body.appendChild(el('ul', { class: 'plan-ideas' }, plan.ideas.map(function (i) {
+        return el('li', { class: i === plan.chosen ? 'chosen' : null }, window.Prompt.ideaText(i, info ? 'info' : 'story') + (i === plan.chosen ? ' ✓' : ''));
+      })));
+    }
     if (plan.idea) body.appendChild(el('p', null, el('strong', null, info ? 'הזווית: ' : 'הרעיון: '), plan.idea));
     if (plan.scenes.length) body.appendChild(el('ol', null, plan.scenes.map(function (s) {
       var notes = [];
@@ -1507,6 +1515,7 @@
     var has = !!G.getKey();
     $('autoCreate').hidden = !has;
     $('autoCreateHint').hidden = !has;
+    $('fastModeBox').hidden = !has;
     $('geminiState').hidden = !has;
     $('makePrompt').classList.toggle('primary', !has);
     $('makePrompt').classList.toggle('big', !has);
@@ -1627,7 +1636,8 @@
     if (!key) { syncGemini(); return; }
     var run = ++autoRuns;
     G.resetModel(); // every new lesson starts with the main model
-    auto = { stages: {}, waitingApproval: false, fallback: false, reviewError: null, ideas: null, seen: [], idea: null, plan: null, story: null };
+    auto = { stages: {}, waitingApproval: false, fallback: false, reviewError: null, ideas: null, seen: [], idea: null, plan: null, story: null,
+      fast: $('fastMode').checked };
     STAGES.forEach(function (st) { auto.stages[st.id] = { state: '', note: '' }; });
     $('autoFlow').hidden = false;
     autoIdeas(key, run);
@@ -1656,7 +1666,8 @@
       auto.ideas = ideas;
       ideas.forEach(function (i) { auto.seen.push(i.title.trim()); });
       stage('ideas', 'done', isInfo() ? 'הזוויות מוכנות' : '');
-      chooseTurn(key, run);
+      if (auto.fast) chooseIdea(key, run, ideas[0], true);
+      else chooseTurn(key, run);
     }, function (e) {
       if (current()) callFailed('ideas', key, run, e);
     });
@@ -1698,10 +1709,11 @@
       ownBox));
   }
 
-  function chooseIdea(key, run, idea) {
+  // fast: chosen by "מצב מהיר", not by the teacher.
+  function chooseIdea(key, run, idea, fast) {
     if (!auto || run !== autoRuns) return;
     auto.idea = idea;
-    stage('choose', 'done', idea.own ? (isInfo() ? 'נבחרה זווית משלכם' : 'נבחר רעיון משלכם') : 'נבחר: ' + idea.title);
+    stage('choose', 'done', idea.own ? (isInfo() ? 'נבחרה זווית משלכם' : 'נבחר רעיון משלכם') : (fast ? 'נבחר אוטומטית: ' : 'נבחר: ') + idea.title);
     autoPlan(key, run);
   }
 
@@ -1720,6 +1732,13 @@
       if (!plan) { callFailed('plan', key, run, { message: 'Gemini החזיר מתווה לא שלם.' }); return; }
       auto.plan = plan;
       stage('plan', 'done');
+      // Fast mode: the outline is approved as it is, unless it needs fixing (then it is the teacher's turn).
+      if (auto.fast && !planProblems(cleanPlan(plan)).length) {
+        auto.plan = cleanPlan(plan);
+        stage('approvePlan', 'done', 'המתווה אושר אוטומטית (מצב מהיר)');
+        autoWrite(key, run);
+        return;
+      }
       planTurn(key, run);
     }, function (e) {
       if (current()) callFailed('plan', key, run, e);
@@ -1838,7 +1857,7 @@
     $('autoCreate').disabled = true;
     flowMsg(null);
     showPlanBox(null);
-    stage('approvePlan', 'done');
+    if (auto.stages.approvePlan.state !== 'done') stage('approvePlan', 'done');
     resetFrom('write');
     stage('write', 'active');
     G.writeStory(key, window.buildStoryPrompt(state.request, plan), streamOpts('write', 'כותב סיפור…', current)).then(function (text) {
@@ -1974,7 +1993,7 @@
           actionBtn('לראות את התשובה ולתקן', function () { showStep(3); parseResponse(); }))));
       return;
     }
-    acceptLesson(a.lesson, state.request, null, auto.plan || a.plan);
+    acceptLesson(a.lesson, state.request, null, auto.plan ? Object.assign({ ideas: auto.ideas, chosen: auto.idea }, auto.plan) : a.plan);
     stage('check', 'done', a.warnings.length ? 'השיעור עבר את הבדיקות (יש הערות בתצוגה)' : '');
     autoReview(key, run);
   }
@@ -2188,6 +2207,8 @@
     $('copySecondPrompt').addEventListener('click', copySecondPrompt);
     $('compareSecond').addEventListener('click', compareSecondManual);
     $('autoCreate').addEventListener('click', autoCreate);
+    $('fastMode').checked = load(STORE_FAST) === true;
+    $('fastMode').addEventListener('change', function () { save(STORE_FAST, $('fastMode').checked); });
     $('checkKey').addEventListener('click', checkKey);
     $('deleteKey').addEventListener('click', deleteKey);
     $('autoFlowClose').addEventListener('click', function () { $('autoFlow').hidden = true; });

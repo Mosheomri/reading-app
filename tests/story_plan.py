@@ -130,9 +130,9 @@ with sync_playwright() as p:
     pp = page.evaluate("([s, i]) => buildPlanPrompt(s, i)", [S, IDEA])
     check("תכנן סיפור קצר" in pp and "הרעיון: הכדור שנעלם. הדמות המרכזית: יואב. מה היא רוצה: למצוא את הכדור." in pp
           and "איך זה נגמר: הכלב מוצא אותו." in pp, "plan: the chosen idea, as text")
-    check("- scenes: מתווה של 4 עד 6 סצנות" in pp and "  - what: מה קורה בה." in pp and "  - feeling: הרגש של הדמות בסצנה." in pp
+    check("- scenes: מתווה של 3 עד 5 סצנות" in pp and "  - what: מה קורה בה." in pp and "  - feeling: הרגש של הדמות בסצנה." in pp
           and "  - words: מילות היעד שמופיעות בה." in pp and "סכום האורכים: בערך 200 מילים." in pp,
-          "plan: 4–6 scenes, each with what happens, the feeling, the target words and its length")
+          "plan (200 words): 3–5 scenes, each with what happens, the feeling, the target words and its length")
     check("מבנה הסיפור:" in pp and "- דמות מרכזית עם שם, שיש לה רצון או בעיה." in pp and "- מילות היעד: כדור, ספסל, שיח, כלב." in pp
           and "אימוג׳י" in pp and '"scenes": [' in pp, "plan: the story's structure, the idea's words with their emoji, the JSON example")
     ppo = page.evaluate("(s) => buildPlanPrompt(s, {own: 'דנה רוצה לטפס על עץ'})", S)
@@ -142,6 +142,22 @@ with sync_playwright() as p:
     ppi = page.evaluate("(s) => buildPlanPrompt(s, {title: 'איך דבורים מדברות', angle: 'ריקוד הדבורים.', words: []})", dict(S, genre="info", topic="דבורים"))
     check("הזווית: איך דבורים מדברות. ריקוד הדבורים." in ppi and "תתי-נושאים" in ppi and "  - facts: העובדות המרכזיות" in ppi
           and "מבנה הטקסט המידעי:" in ppi and "feeling" not in ppi, "plan (info): subtopics with their key facts")
+
+    # Scenes by length: up to 80 words 2–3, up to 250 3–5, longer 4–6; the same in the copy-paste prompt
+    ranges = page.evaluate("""() => [60, 80, 81, 250, 251, 900].map(n => {
+      const s = {topic: 'x', length: n, level: '3-4', genre: 'story', wordsMode: 'number', wordCount: 4, words: []};
+      const plan = buildPlanPrompt(s, {own: 'רעיון'}), paste = buildPrompt(s), info = buildPlanPrompt(Object.assign({}, s, {genre: 'info'}), {own: 'x'});
+      return [n, Prompt.sceneRange(n), plan.match(/מתווה של (\\d) עד (\\d) סצנות/).slice(1).join('-'),
+              paste.match(/מתווה של (\\d) עד (\\d) סצנות/).slice(1).join('-'), info.match(/מתווה של (\\d) עד (\\d) תתי-נושאים/).slice(1).join('-')]; })""")
+    want = {60: "2-3", 80: "2-3", 81: "3-5", 250: "3-5", 251: "4-6", 900: "4-6"}
+    check(all(r[2] == r[3] == r[4] == want[r[0]] == "%d-%d" % (r[1]["min"], r[1]["max"]) for r in ranges),
+          "scenes by length (≤80: 2–3, ≤250: 3–5, more: 4–6), in the plan, the copy-paste prompt and for subtopics (%s)" % [(r[0], r[2], r[3]) for r in ranges])
+
+    # Levels: sentence length in words, not numbers; variety kept
+    sent = page.evaluate("Levels.LIST.map(l => l.sentence)")
+    check(not any(c.isdigit() for l in sent for c in l) and "קצרים מאוד" in sent[0] and "בדרך כלל קצרים" in sent[1] and "באורך בינוני" in sent[2]
+          and "בינוני עד ארוך" in sent[3] and all(("מגוונים" in l or "לא כולם באותו אורך" in l or "חבר אותם" in l) for l in sent),
+          "levels: sentence length without numbers, variety kept (%s)" % sent)
 
     # ---------- 3. The writing prompt ----------
     wp = page.evaluate("([s, p]) => buildStoryPrompt(s, p)", [S, PLAN])
@@ -172,7 +188,7 @@ with sync_playwright() as p:
     # ---------- 5. The copy-paste prompt: plan first ----------
     cp = page.evaluate("(s) => buildPrompt(s)", S)
     check("קודם תכנן, אחר כך כתוב לפי התכנון." in cp and "תכנון (בשדה plan, לפני הסיפור):" in cp and "- idea: הרעיון ב-2 עד 3 משפטים" in cp
-          and "- scenes: מתווה של 4 עד 6 סצנות" in cp and "כתיבה (בשדה story):" in cp and "דוגמה לסגנון הכתיבה ברמה הזו" in cp,
+          and "- scenes: מתווה של 3 עד 5 סצנות" in cp and "כתיבה (בשדה story):" in cp and "דוגמה לסגנון הכתיבה ברמה הזו" in cp,
           "copy-paste: plan first, then write from it, with the style example")
     example = json.loads(cp.split("כתוב את מספר הסצנות והתרגילים שביקשתי):\n", 1)[1])
     keys = list(example.keys())
@@ -343,6 +359,35 @@ with sync_playwright() as p:
     page.click("#writeFromPlan")
     wait_stage(page, "review", "done")
     check("1. סצנה 1: עובדה 1" in mock.of("write")[0]["prompt"], "info: the writer gets the subtopics and facts")
+    ctx.close()
+
+    # Fast mode: the first idea and the outline are approved automatically; both still shown in the preview
+    mock, ctx, page = start()
+    check(page.is_visible("#fastModeBox") and not page.is_checked("#fastMode"), "fast mode: a checkbox next to 'צור שיעור', off by default")
+    page.check("#fastMode")
+    page.reload()
+    check(page.is_checked("#fastMode"), "fast mode: remembered")
+    page.fill("#topic", "כלב בגינה")
+    page.fill("#wordCount", str(len(targets)))
+    page.check("input[name=nikud][value=none]")
+    page.click("#autoCreate")
+    wait_stage(page, "review", "done")
+    check("נבחר אוטומטית: רעיון 1-1" in stage_text(page, "choose") and "אושר אוטומטית" in stage_text(page, "approvePlan")
+          and len(mock.of("write")) == 1 and "רעיון 1-1" in mock.of("plan")[0]["prompt"], "fast mode: the first idea, the outline approved, written without stops")
+    page.click("#steps li[data-step='4']")
+    page.click("#planView summary")
+    pv = page.text_content("#planViewBody")
+    check("הרעיונות שהוצעו:" in pv and all("רעיון 1-%d" % i in pv for i in (1, 2, 3)) and "רעיון 1-1" in page.text_content("#planViewBody .chosen")
+          and "סצנה 1" in pv, "fast mode: the ideas (the chosen one marked) and the outline in the preview")
+    ctx.close()
+
+    # Fast mode with an outline that needs fixing: the teacher's turn after all
+    mock, ctx, page = start()
+    mock.answers["plan"] = json.dumps({"title": "כותרת", "targetWords": plain["targetWords"][:1], "scenes": [{"what": "א", "feeling": "", "words": [], "length": 30}]}, ensure_ascii=False)
+    page.check("#fastMode")
+    page.click("#autoCreate")
+    wait_stage(page, "approvePlan", "wait")
+    check(len(mock.of("write")) == 0 and page.is_visible("#writeFromPlan"), "fast mode, outline with one target word: shown to the teacher instead")
     ctx.close()
 
     check(not errors, "no page errors (%s)" % errors[:3])
