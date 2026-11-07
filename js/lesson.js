@@ -453,8 +453,8 @@
     var n = lesson.targetWords.length;
     if (n < 2 || n > 10) errors.push('צריך בין 2 ל-10 מילות יעד (יש ' + n + ').');
     lesson.targetWords.forEach(function (t, i) {
+      // No emoji is fine: a word with no exact emoji has none (the games show the word alone).
       if (!t.word) errors.push('מילת יעד ' + (i + 1) + ' ריקה.');
-      else if (!t.emoji) errors.push('חסר אימוג׳י למילה "' + t.word + '".');
     });
     var bareTargets = targets.map(H.bare);
     bareTargets.forEach(function (b, i) {

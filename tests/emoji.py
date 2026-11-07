@@ -1,5 +1,7 @@
 """Emoji: the prompt asks for common, old emoji only; an emoji the device cannot show (measured on a canvas) is
-replaced by its word: teacher preview, child start page, memory cards, print; the build game leaves it out."""
+replaced by its word: teacher preview, child start page, memory cards, print; the build game leaves it out.
+An emoji only if it shows exactly the word, else the field is empty: no error; memory is a word-word pair; the start
+page and the build game show no picture and no empty place; the teacher preview marks it "אין ציור"."""
 import json, sys, os, mimetypes
 from urllib.parse import urlparse, unquote
 from playwright.sync_api import sync_playwright
@@ -59,6 +61,64 @@ with sync_playwright() as p:
     start = page.text_content(".big-emoji") or ""
     check(MISSING not in start and page.locator(".big-emoji .emoji-word").count() == 1 and lesson["targetWords"][1]["emoji"] in start,
           "child start page: the word in place of the missing emoji (%s)" % start)
+
+    # ---------- No exact emoji: the field stays empty ----------
+    page.goto(SITE + "index.html")
+    EXACT = "- אימוג׳י רק אם הוא מראה בדיוק את המילה. אם אין אימוג׳י מדויק, השאר את השדה emoji ריק."
+    PREFER = "- כשאתה בוחר את מילות היעד בעצמך, העדף מילים שיש להן אימוג׳י מדויק."
+    S = {"topic": "x", "length": 200, "level": "3-4", "genre": "story", "wordsMode": "number", "wordCount": 4, "words": []}
+    SL = dict(S, wordsMode="list", words=["שולחן", "ציור"])
+    for label, js, arg in [("copy-paste", "(s) => buildPrompt(s)", S), ("plan", "(s) => buildPlanPrompt(s, {own: 'רעיון'})", S)]:
+        t = page.evaluate(js, arg)
+        check(EXACT in t and PREFER in t, label + " prompt: an exact emoji or an empty field; prefer words with an exact emoji")
+    t = page.evaluate("(s) => buildIdeasPrompt(s, [])", S)
+    check(PREFER in t, "ideas prompt: prefer words with an exact emoji")
+    for label, js in [("copy-paste", "(s) => buildPrompt(s)"), ("plan", "(s) => buildPlanPrompt(s, {own: 'רעיון'})")]:
+        t = page.evaluate(js, SL)
+        check(EXACT in t and PREFER not in t, label + " prompt with the teacher's words: exact emoji or empty, no 'prefer' line")
+
+    noemo = json.loads(json.dumps(sample))
+    noemo["targetWords"][0]["emoji"] = ""
+    w0 = noemo["targetWords"][0]["word"]
+    res = page.evaluate("(l) => Lesson.check(Lesson.coerce(l).lesson)", noemo)
+    check(not [e for e in res["errors"] if "אימוג" in e], "check: a word with no emoji is not an error (%s)" % res["errors"])
+    page.goto(SITE + "index.html")
+    page.evaluate("(l) => localStorage.setItem('readingApp.draft', JSON.stringify({lesson: l, request: null, nikudVerified: null}))", noemo)
+    page.reload()
+    page.click("#resumeDraft")
+    check(page.locator("#preview .chip").nth(0).locator(".no-pic").text_content() == "אין ציור"
+          and page.locator("#preview .chip .no-pic").count() == 1, "teacher preview: a small 'אין ציור' mark on the word with no emoji only")
+
+    page.goto(SITE + "play.html#" + page.evaluate("(l) => Lesson.encode(Lesson.coerce(l).lesson)", noemo))
+    page.wait_for_selector(".stage-actions .btn")
+    start = page.text_content(".big-emoji") or ""
+    shown0 = page.evaluate("(w) => Render.text(Lesson.decode(location.hash), w)", w0)
+    check(page.locator(".big-emoji .emoji-word").count() == 0 and shown0 not in start and noemo["targetWords"][1]["emoji"] in start,
+          "child start page: the word with no emoji is left out, no empty place (%s)" % start)
+    page.click(".stage-actions .btn")
+    page.wait_for_selector(".mcard")
+    faces = page.eval_on_selector_all(".mcard .face", "els => els.map(e => e.textContent)")
+    words = page.eval_on_selector_all(".mcard.word .face", "els => els.map(e => e.textContent)")
+    check(faces.count(shown0) == 2 and words.count(shown0) == 2 and "" not in faces,
+          "memory: the word with no emoji is a word-word pair (%s)" % faces)
+    idx = [i for i, f in enumerate(faces) if f == shown0]
+    cards = page.locator(".mcard")
+    cards.nth(idx[0]).click(); cards.nth(idx[1]).click()
+    page.wait_for_timeout(300)
+    check(page.locator(".mcard.matched").count() == 2, "memory: the two word cards match")
+
+    one = json.loads(json.dumps(sample))
+    for t in one["targetWords"]: t["emoji"] = ""
+    page.goto(SITE + "play.html#" + page.evaluate("(l) => Lesson.encode(Lesson.coerce(l).lesson)", one))
+    page.wait_for_selector(".stage-actions .btn")
+    check(page.locator(".big-emoji").count() == 0, "child start page: no emoji at all → no emoji row")
+    page.click(".stage-actions .btn")
+    page.wait_for_selector(".mcard")
+    page.click("#navNext")
+    page.wait_for_timeout(300)
+    check(page.text_content("#stage h1") == "הרכבת מילה" and page.locator("#stage .big-emoji").count() == 0,
+          "build game: no picture for a word with no emoji")
+
     ctx.close()
     check(not errors, "no page errors: %s" % errors)
     browser.close()

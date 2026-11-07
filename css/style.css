@@ -566,6 +566,7 @@ textarea.open-answer { display: block; max-width: 640px; margin: 0 auto; font-si
 .nikud-check:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; border-radius: 4px; }
 .linkish { background: none; border: 0; padding: 0; color: var(--primary); text-decoration: underline; cursor: pointer; font: inherit; }
 .big-emoji .emoji-word { font-size: 1.4rem; letter-spacing: 0; }
+.chip .no-pic { font-size: .75rem; color: var(--muted, #666); border: 1px dashed currentColor; border-radius: 999px; padding: 0 6px; margin-inline-start: 6px; vertical-align: middle; }
 .second-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .second-bar strong { margin-inline-end: auto; }
 .second-status { margin: 10px 0; }

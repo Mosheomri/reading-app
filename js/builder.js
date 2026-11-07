@@ -681,7 +681,9 @@
     var p = U.clear($('preview'));
     p.appendChild(el('h2', { style: 'text-align:center' }, slotText(lesson, 'title', lesson.title, mark)));
     p.appendChild(el('div', { class: 'target-chips' }, lesson.targetWords.map(function (t, i) {
-      return el('span', { class: 'chip' }, U.emojiShown(t.emoji) ? t.emoji + ' ' : null, slotText(lesson, 'targetWords[' + i + '].word', t.word, mark));
+      // No emoji: a small "אין ציור" mark, so the teacher can add one by hand.
+      return el('span', { class: 'chip' }, U.emojiShown(t.emoji) ? t.emoji + ' ' : null, slotText(lesson, 'targetWords[' + i + '].word', t.word, mark),
+        t.emoji ? null : el('span', { class: 'no-pic', title: 'אפשר להוסיף אימוג׳י בעריכה' }, 'אין ציור'));
     })));
     var second = secondBox(true);
     if (second) p.appendChild(second);

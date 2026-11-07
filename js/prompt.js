@@ -184,13 +184,16 @@
     return { min: 4, max: 6 };
   }
 
+  // An emoji only if it shows exactly the word (not a chair for "שולחן", not a palette for "ציור"); otherwise empty.
   var EMOJI_LINE = '- לכל מילת יעד הוסף אימוג׳י אחד שמתאר אותה. רק אימוג׳י נפוץ וותיק שמוצג בכל מכשיר (כמו 🐶 🌳 ⚽ 🏠 🍎): ' +
-    'בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.';
+    'בלי אימוג׳י חדשים, בלי צירוף של כמה אימוג׳י, בלי גווני עור ובלי דגלים.\n' +
+    '- אימוג׳י רק אם הוא מראה בדיוק את המילה. אם אין אימוג׳י מדויק, השאר את השדה emoji ריק.';
 
-  // The AI chooses the words: n simple, concrete words that the text needs.
+  // The AI chooses the words: n simple, concrete words that the text needs, preferably with an exact emoji.
   function chooseWordsLine(settings, n) {
     return '- בחר ' + settings.wordCount + ' מילות יעד פשוטות ומוחשיות, שמשתלבות ב' + n.text +
-      ' באופן טבעי (לדוגמה: בסיפור על כדורגל, החפץ הוא "כדור", לא "כדורגל").';
+      ' באופן טבעי (לדוגמה: בסיפור על כדורגל, החפץ הוא "כדור", לא "כדורגל").\n' +
+      '- כשאתה בוחר את מילות היעד בעצמך, העדף מילים שיש להן אימוג׳י מדויק.';
   }
 
   var ONE_MEANING = '- כל מילת יעד במשמעות אחת בלבד לאורך כל הטקסט (למשל "שער" רק כשער בכדורגל, לא גם כשער כניסה).';

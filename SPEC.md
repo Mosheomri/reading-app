@@ -528,7 +528,12 @@ All games use only the lesson's target words (+ their emojis). An emoji this dev
 (`Util.emojiShown`: measured on a canvas; a missing emoji is drawn like a character no font has, an unknown
 sequence or flag falls apart into wider parts) is replaced by its word: in the teacher preview and print (the
 word alone), on the start page and on its memory card; the build game leaves it out (the word is the answer).
-1. **זוגות (Memory)** – cards: word ↔ emoji. Flip two, match pairs.
+A target word may have **no emoji** (the AI leaves the field empty when no emoji shows exactly the word, section 6;
+the teacher may also clear it): no picture and no empty place anywhere. The start page leaves the word out of its
+emoji row (no row at all if no word has an emoji); the build game shows no picture; print shows the word alone;
+the teacher preview adds a small dashed mark "אין ציור" to its chip (`.no-pic`), so the teacher can add one by hand.
+1. **זוגות (Memory)** – cards: word ↔ emoji. Flip two, match pairs. A word with no emoji (or one this device cannot
+   show) is a word-word pair: the same word on both cards (both read aloud when flipped).
 2. **הרכבת מילה** – letters of a target word shuffled (with nikud attached to each letter as written); child taps letters in order.
 3. **שומעים ובוחרים** – the word is read aloud (Web Speech API, `he-IL`); child picks it from 3–4 target words.
    If no Hebrew voice is available on the device, skip this game silently.
@@ -692,6 +697,7 @@ Rules:
   Quotation marks of dialogue are not inside a word, so they are not counted.
 - `fill`: the sentence with the right option in place of ___ should be found in the story (compared without nikud
   and punctuation, like `order`); otherwise a warning "המשפט "…" לא נמצא בסיפור".
+- A target word with no emoji is not an error (section 4.1).
 - Every target word appears in the story at least once – compare after stripping nikud, and allow Hebrew prefixes (ו, ה, ב, כ, ל, מ, ש, and combinations like וה, שב).
 - Number of target words matches the request (warning).
 - `open`: question and sample answer required. `locate`: question required; the answer sentence must be found
@@ -732,7 +738,10 @@ length ("בערך N מילים. סטייה של עד 20% (בין 0.8·N ל-1.2·
 
 מילות יעד: {the teacher's words | choose n simple, concrete words that fit the text naturally}; only in their
  right meaning; at least once, preferably 2–3 times if natural; never invent a sentence or character for a word;
- "כל מילת יעד במשמעות אחת בלבד לאורך כל הטקסט (למשל "שער" רק כשער בכדורגל, לא גם כשער כניסה)."; one common emoji each.
+ "כל מילת יעד במשמעות אחת בלבד לאורך כל הטקסט (למשל "שער" רק כשער בכדורגל, לא גם כשער כניסה)."; one common emoji each;
+ "אימוג׳י רק אם הוא מראה בדיוק את המילה. אם אין אימוג׳י מדויק, השאר את השדה emoji ריק." (`EMOJI_LINE`: a chair is not
+ "שולחן", a palette is not "ציור"); when the AI chooses the words (`chooseWordsLine`, also in the ideas prompt):
+ "כשאתה בוחר את מילות היעד בעצמך, העדף מילים שיש להן אימוג׳י מדויק."
 
 כתיבה (בשדה story): write the text from the plan, in order, about the planned length of each part.
 שפה: {natural Hebrew; varied sentences and connectives; no high language, jargon, translated phrases or filler;
@@ -801,6 +810,14 @@ Source of nikud: Dicta Nakdan, by copy-paste in step 5 (no API call, so the site
 - Nikud verification layer: verified word dictionary (JSON) + deterministic comparison, coloring words green / red / gray; homographs flagged for review, not as errors.
 - Direct (API) integration with Dicta Nakdan instead of copy-paste.
 - Word-search game, printable worksheet, custom GPT / Gemini Gem for teachers.
+- Pictograms from ARASAAC for words with no exact emoji (researched 2026-11, not built). The API needs no key:
+  search `https://api.arasaac.org/v1/pictograms/he/bestsearch/{word}` (also `/search/`; `he` is a supported
+  locale; JSON `[{_id, keywords: [{keyword, plural}], …}]`, e.g. שולחן → 3129); image
+  `https://static.arasaac.org/pictograms/{id}/{id}_300.png` or `https://api.arasaac.org/v1/pictograms/{id}`
+  (`resolution` 500/2500, `color`, `plural`…). Both send `Access-Control-Allow-Origin: *` (fetch from the browser
+  works; an `<img>` needs no CORS). Results are loose (שולחן also gives טניס שולחן), so the teacher picks.
+  License: CC BY-NC-SA 4.0, author Sergio Palao, owner the Government of Aragón: the credit must be shown,
+  non-commercial use only, and a work made from the pictograms shares under the same license.
 
 ---
 
