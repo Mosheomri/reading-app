@@ -412,6 +412,18 @@
   // request (optional): {length: number, wordsMode: 'number'|'list', wordCount: n, words: [..]}
   // Returns {errors, warnings, wordCount, missingWords}. Nikud is not checked here:
   // it is added with Dicta in the check step.
+  // Abbreviations a child should not have to read: a gershayim inside a word (אחה"צ, ביה"ס), or a known one written
+  // without it (אחהצ), also after a one-letter prefix. Returns them as written, without nikud.
+  var ABBR_KNOWN = ['אחהצ', 'לפנהצ', 'ביהס', 'ביהח', 'סהכ', 'כנל', 'עפי', 'וכו'];
+  function abbreviations(text) {
+    var plain = H.stripNikud(String(text || ''));
+    var found = plain.match(/[\u05D0-\u05EA]+["\u05F4][\u05D0-\u05EA]+/g) || [];
+    (plain.match(/[\u05D0-\u05EA]+/g) || []).forEach(function (w) {
+      if (ABBR_KNOWN.indexOf(w) !== -1 || (w.length > 3 && 'ובלמהשכ'.indexOf(w[0]) !== -1 && ABBR_KNOWN.indexOf(w.slice(1)) !== -1)) found.push(w);
+    });
+    return found;
+  }
+
   function check(lesson, request) {
     var errors = [];
     var warnings = [];
@@ -488,6 +500,12 @@
         : 'מילת היעד "' + t + '" לא מופיעה בסיפור.');
     });
 
+    var abbr = [];
+    textRefs(lesson).forEach(function (ref) {
+      abbreviations(ref[0][ref[1]]).forEach(function (a) { if (abbr.indexOf(a) === -1) abbr.push(a); });
+    });
+    if (abbr.length) warnings.push('קיצור: כדאי לכתוב מילה מלאה (' + abbr.join(', ') + ').');
+
     var storyBare = bareWords(lesson.story);
     if (!lesson.exercises.length) errors.push('אין תרגילים.');
     lesson.exercises.forEach(function (ex, i) {
@@ -502,6 +520,10 @@
       } else if (ex.type === 'fill') {
         if (!ex.sentence) errors.push(label + ': חסר משפט.');
         else if (ex.sentence.indexOf('___') === -1) errors.push(label + ': המשפט חייב לכלול ___ במקום המילה החסרה.');
+        // The sentence is copied from the story: with the right word back in, it is found there (like order sentences).
+        else if (ex.options[ex.answer] && findSentence(storyBare, ex.sentence.replace('___', ex.options[ex.answer])) === -1) {
+          warnings.push(label + ': המשפט "' + ex.sentence.replace('___', ex.options[ex.answer]) + '" לא נמצא בסיפור.');
+        }
         checkOptions(label, ex, errors, warnings);
       } else if (ex.type === 'order') {
         if (ex.sentences.length < 2) errors.push(label + ': צריך לפחות 2 משפטים.');
@@ -587,6 +609,7 @@
     counts: counts,
     bareWords: bareWords,
     findSentence: findSentence,
+    abbreviations: abbreviations,
     sentencesOf: sentencesOf,
     LINES_WARNING: LINES_WARNING,
     lineBroken: lineBroken,

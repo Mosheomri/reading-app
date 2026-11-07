@@ -134,9 +134,10 @@ input.narrow { width: 7em; }
 .choice input { accent-color: var(--primary); }
 
 /* Question types (settings) */
-.ex-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px 16px; }
+/* Every type on one line, all the same size (the longest label, "מסר גלוי וסמוי", included) */
+.ex-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 16px; }
 .ex-type { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.ex-type .choice { flex: 1 1 auto; }
+.ex-type .choice { flex: 1 1 auto; white-space: nowrap; }
 .ex-type input[type="number"] { width: 4.5em; text-align: center; }
 .link-btn { border: none; background: none; padding: 0; color: var(--primary); text-decoration: underline; cursor: pointer; font-size: inherit; }
 
@@ -721,6 +722,7 @@ code.addr { direction: ltr; unicode-bidi: isolate; background: #f6f2ea; border-r
 .idea-words { margin: 4px 0 0; padding-inline-start: 18px; font-size: 0.9rem; color: var(--muted); }
 .own-idea { margin-top: 12px; }
 .fast-mode { margin-top: 10px; }
+.model-tip { margin-bottom: 12px; }
 .plan-view .chosen { font-weight: 600; }
 .own-idea label, .plan-field > span { display: block; font-weight: 600; margin-bottom: 4px; }
 .plan-field { display: block; margin-bottom: 10px; }

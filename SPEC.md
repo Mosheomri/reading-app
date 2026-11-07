@@ -83,7 +83,8 @@ Suggested structure:
 
 #### Question types
 - Seven rows, in this order (also the order asked for in the prompt): אמריקאית, נכון / לא נכון, השלמה, סידור,
-  פתוחה, איתור מידע, מסר גלוי וסמוי (`Levels.TYPES`). Count 0 = not included; unchecking sets 0, checking
+  פתוחה, איתור מידע, מסר גלוי וסמוי (`Levels.TYPES`). Each button is on one line and all are the same size
+  (a grid of columns at least 260 px wide, labels not wrapped). Count 0 = not included; unchecking sets 0, checking
   gives the level's count (or 1).
 - Defaults per level, in `js/levels.js` (`exercises`), applied when the level changes and by "חזרה לברירת
   המחדל":
@@ -153,7 +154,10 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   `console.warn` on errors). Calls: `check-key`, `story-ideas`, `story-plan`, `write-story`, `edit-story`, `write-exercises`, `review-text`, `nikud-check` (section 3.2; `write-lesson`:
   the whole lesson in one call, `Gemini.writeLesson`, not used by the flow). The key is never logged.
 - **Model and output**: `MODEL` is one constant at the top of `js/gemini.js`: `gemini-3.8-flash` (stable, has a free tier; checked in the official pricing and models pages,
-  October 2026). Structured output: `generationConfig.responseMimeType = 'application/json'` and a
+  October 2026). **A stronger model for the writing calls**: checked in the official pricing, rate-limits and models
+  pages in November 2026: no Pro model is on the free tier (`gemini-3.1-pro-preview` and `gemini-4-argon`: "Not
+  available" on the free tier; `gemini-2.5-pro` is deprecated and no longer offered), so the ideas, the plan and the
+  writing use `MODEL` too. Check again when Google changes the free tier. Structured output: `generationConfig.responseMimeType = 'application/json'` and a
   `responseSchema` (OpenAPI subset): `IDEAS_SCHEMA.story` (`{ideas: [{title, character, want, obstacle, ending,
   words: [{word, use}]}]}`) and `IDEAS_SCHEMA.info` (`angle` instead of the four story fields); `PLAN_SCHEMA.story`
   (`{title, targetWords: [{word, emoji}], scenes: [{what, feeling, words, length}]}`) and `PLAN_SCHEMA.info`
@@ -235,7 +239,9 @@ check that the text fits the lesson's level, and to report mismatches as `style`
   from a cancelled run are ignored.
 - **Tests**: `tests/gemini.py`, against a mock API (Playwright routing; the mock tells the calls apart by their
   schema, and the writer from the editor by the editor's role); the ideas, the plan and the teacher's turns in
-  `tests/story_plan.py`; the editor's call, its guard and the
+  `tests/story_plan.py`; the rules of section 6 that every prompt shares (one meaning per word, no clichés,
+  professional terms or abbreviations, exercise sentences word for word) and their code checks in `tests/text_rules.py`;
+  the editor's call, its guard and the
   thinking levels also in `tests/text_quality.py`, with the kind of text, the new prompts, the review's editing
   checks, letters of another script and lines instead of paragraphs. **Real timing**: `tests/gemini_bench.py`
   (not in `run_all.py`; the key from the `GEMINI_API_KEY` environment variable only) writes lessons the way the
@@ -244,6 +250,9 @@ check that the text fits the lesson's level, and to report mismatches as `style`
 ### Step 2: Prompt
 - Generate the prompt (section 6) from the form values.
 - Big "העתק" button. Short instruction: "הדביקו בצ׳אט של הבינה שלכם ושלחו".
+- Under the button, a bold tip (`#modelTip`): "לתוצאה הטובה ביותר, בחרו בצ׳אט את המודל החזק ביותר שיש לכם (למשל Pro
+  ב-Gemini), ולא מצב מהיר או בחירה אוטומטית." The same prompt gives a weak story with a fast model and a good one
+  with a Pro model.
 
 ### Step 3: Paste response
 - Textarea for the AI's answer.
@@ -657,6 +666,12 @@ Rules:
   when the answer is read (`Lesson.coerce`), with the note "תוקנו אותיות ממערכת כתב אחרת…". A word written
   entirely in another script is not checked.
 - Lines instead of paragraphs: warning (step 4).
+- **Abbreviations** (`Lesson.abbreviations`), in any text of the lesson, without nikud: a gershayim (`"` or `״`)
+  between letters of a word (אחה"צ, ביה"ס), or a known one written without it (`ABBR_KNOWN`: אחהצ, לפנהצ, ביהס,
+  ביהח, סהכ, כנל, עפי, וכו; also after a one-letter prefix). One warning: "קיצור: כדאי לכתוב מילה מלאה (…)".
+  Quotation marks of dialogue are not inside a word, so they are not counted.
+- `fill`: the sentence with the right option in place of ___ should be found in the story (compared without nikud
+  and punctuation, like `order`); otherwise a warning "המשפט "…" לא נמצא בסיפור".
 - Every target word appears in the story at least once – compare after stripping nikud, and allow Hebrew prefixes (ו, ה, ב, כ, ל, מ, ש, and combinations like וה, שב).
 - Number of target words matches the request (warning).
 - `open`: question and sample answer required. `locate`: question required; the answer sentence must be found
@@ -690,22 +705,25 @@ length ("בערך N מילים. סטייה של עד 20% (בין 0.8·N ל-1.2·
 תכנון (בשדה plan, לפני הסיפור):
 - idea: the idea in 2–3 sentences (character and name, wish, obstacle, ending) | the angle (informational)
 - scenes: an outline of 2–3 / 3–5 / 4–6 scenes (by the length, as in the automatic flow) in order (what, feeling | what = subtopic, facts), words, length (sum ≈ N)
-מבנה הסיפור: {named main character with a wish or problem; attempts, climax, resolution; beginning, middle and
- end; consistent place and time; every sentence moves the plot; short dialogue welcome; a story only}
+מבנה הסיפור: {named main character with a wish or problem; attempts, climax, resolution; "הדמות פותרת את
+ הבעיה בעצמה, במעשה או ברעיון שלה, ולא מבוגר שפותר בשבילה או מזל."; beginning, middle and end; consistent place and time; every sentence moves the plot; short dialogue welcome; a story only}
 | מבנה הטקסט המידעי: {one topic; an opening sentence; a paragraph per subtopic; a closing sentence; no plot and
  no fictional characters; informational only}
 
 מילות יעד: {the teacher's words | choose n simple, concrete words that fit the text naturally}; only in their
  right meaning; at least once, preferably 2–3 times if natural; never invent a sentence or character for a word;
- one common emoji each.
+ "כל מילת יעד במשמעות אחת בלבד לאורך כל הטקסט (למשל "שער" רק כשער בכדורגל, לא גם כשער כניסה)."; one common emoji each.
 
 כתיבה (בשדה story): write the text from the plan, in order, about the planned length of each part.
 שפה: {natural Hebrew; varied sentences and connectives; no high language, jargon, translated phrases or filler;
- the level's sentence, language, story and avoid lines; paragraphs of 3–6 sentences}; no nikud; ktiv male; no emoji.
+ "בלי קלישאות וביטויים שחוקים (כמו "מחריש אוזניים", "אווירה של חג באוויר")"; "בלי מונחים מקצועיים (כמו "חלוץ",
+ "מחצית", "גול")"; the level's sentence, language, story and avoid lines; paragraphs of 3–6 sentences}; no nikud;
+ ktiv male; "בלי קיצורים: כתוב מילים מלאות (אחר הצהריים, לא אחה"צ)."; no emoji.
 דוגמה לסגנון הכתיבה ברמה הזו (לא לנושא ולא לתוכן): --- {js/examples.js} ---
 לפני שאתה מחזיר את התשובה: קרא את הטקסט כאילו אתה מקריא אותו לילד…
 
-תרגילים (בסדר הזה): {the chosen types; for an informational text "הסיפור" → "הטקסט"}
+תרגילים (בסדר הזה): {the chosen types; for an informational text "הסיפור" → "הטקסט"; order: "כל משפט מועתק מהסיפור
+ מילה במילה, ולא סיכום."; fill: "משפט מהסיפור, מילה במילה, שבו מילה אחת הוחלפה ב-___."}
 החזר את ה-JSON …: {the schema example of section 5 with "plan": {idea, scenes} right after "version", before
  the story; no nikud, no nikudMode}
 ```
@@ -726,6 +744,10 @@ The site shows the plan to the teacher in the preview and does not keep it (sect
   "write from the plan; a small detail may change if it makes the text better, but not the plot and the ending
   (the facts)", the target words with their use rules, the language rules, the style example and read aloud.
   The structure rules are not here: the plan covers them, so the prompt stays short and focused. Answer `{story}`.
+- **Shared rules**: one meaning per target word is also in the plan and writing prompts; no clichés and no
+  professional terms in the writing and editor prompts (`languageLines`); "בלי קיצורים" in every prompt (ideas,
+  plan, writing, editor, exercises); the exercise lines (word for word, `exerciseLines`) are the same in the
+  exercises prompt of the automatic flow.
 - **Style examples** (`js/examples.js`, `StyleExamples.get(level, genre)`): one paragraph per level and kind of
   text, without nikud. The current ones are temporary placeholders, to be replaced with real examples. A level
   with no example: the line is left out.
