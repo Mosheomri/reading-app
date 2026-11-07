@@ -23,7 +23,8 @@ then sends the child a link. The child plays, reads and answers – **no AI, no 
   decoded, at most 1.5 s), and small (up to 160 px) under the buttons of the child's finish screen.
 - Vendor LZ-String locally (`js/lz-string.min.js`), do not rely on a CDN.
 - No analytics, no cookies, no tracking. `localStorage` only for conveniences: the teacher's last form values
-  and draft, and the child's last reading pace.
+  and draft, and the child's last reading pace. The one thing sent from the teacher page to anyone but the AI and
+  Dicta is a lesson the teacher chooses to add to the public library (step 6), only from a browser set up for it.
 - Local scripts and CSS are linked with a version query (`js/builder.js?v=2`). Bump the number in `index.html`
   and `play.html` on every release, so browsers do not run an old cached copy.
 - Automated tests: Playwright (Python) suites in `tests/`, run with `python tests/run_all.py`.
@@ -458,6 +459,25 @@ talks with the teacher page (`js/dicta.js`) through `window.postMessage`.
   part), Gemini streams (no total time limit), and the child page renders 2000 words without delay.
 - Build the link, show it, "העתק קישור" button and "שלח בוואטסאפ" button (`https://wa.me/?text=...`).
 - "פתח לבדיקה" button that opens `play.html` with the lesson.
+- **"📚 הוסף לספרייה"**: sends the lesson to the public library, a Google Form whose answers go to a sheet. Its
+  fields, all short answers, in this order: כותרת, נושא, רמה, סוג טקסט, מילות יעד, קישור.
+  - Shown only in a browser where the library was set up, so other teachers do not send to it. The setup is a
+    one-time link: the site's address with `?library=<form id>,<entry>,<entry>,<entry>,<entry>,<entry>,<entry>`
+    (the `entry.N` numbers of the six fields, in the order above). Opening it keeps `{form, fields}` in
+    `localStorage` (`readingApp.library`), shows "הספרייה הוגדרה בדפדפן הזה ✓" once, and removes the parameter
+    from the address. A broken link shows an error and keeps nothing; `?library=off` forgets the library.
+  - The current setup link (form "ספריית סיפורים", entries read from the form page's `FB_PUBLIC_LOAD_DATA_`):
+    `https://mosheomri.github.io/reading-app/?library=1FAIpQLSdof2vNydRXPmrcJifOSTn4sN7KIkJ5BfhftDOItE8EJxMAKw,2007797355,193105897,1747520053,1055424941,491000135,118766139`.
+    A new form, or a field added or reordered, needs a new link.
+  - Sending: `fetch` POST to `https://docs.google.com/forms/d/e/<form id>/formResponse`, `mode: 'no-cors'`, the
+    fields form-encoded in the body (a GET would put a link of thousands of characters in the address). The row:
+    the title without nikud, the topic, the level's name (`Levels` label, e.g. ג׳–ד׳), the kind of text (סיפור /
+    טקסט מידעי), the target words without nikud separated by ", ", and the lesson's link.
+  - Google's answer cannot be read with `no-cors`, so success is worded as sent, not received: "נשלח לספרייה ✓",
+    with advice to look in the library's sheet that the row arrived. The button is then disabled for that link (a
+    new link brings it back). A network failure: "השליחה לספרייה נכשלה", and the button can be pressed again.
+  - Tests: `tests/library.py` (the request is caught, Google is not reached); `tests/library.py --real` sends one
+    real test row.
 - Button to download the lesson JSON (backup) and to load a JSON file back for editing.
 - **"🖨️ הדפסה"** button and a checkbox **"לכלול דף תשובות"**. The button builds a worksheet (`js/print.js`)
   into a hidden `#printArea` on the teacher page and calls `window.print()`. A print stylesheet shows only that

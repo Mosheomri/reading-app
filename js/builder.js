@@ -10,6 +10,7 @@
 
   var STORE_SETTINGS = 'readingApp.settings';
   var STORE_DRAFT = 'readingApp.draft';
+  var STORE_LIBRARY = 'readingApp.library'; // the public library's Google Form, set by its setup link (setupLibrary)
   var STORE_FAST = 'readingApp.fastMode'; // "מצב מהיר": the first idea and the outline are approved automatically
   var MAX_STORY_WORDS = 2000;
   var LONG_LINK = 8000; // characters; above this the link step suggests checking it before sending
@@ -2157,6 +2158,96 @@
     var title = H.stripNikud(lesson.title || 'שיעור קריאה');
     $('waLink').href = 'https://wa.me/?text=' + encodeURIComponent('📖 ' + title + '\n' + state.link);
     $('openLink').href = state.link;
+    if (state.libraryLink !== state.link) { state.libraryLink = state.link; renderLibrary(); }
+  }
+
+  /* ---------- The public library (a Google Form) ---------- */
+
+  // The form's short-answer fields, in its order.
+  var LIBRARY_FIELDS = ['title', 'topic', 'level', 'genre', 'words', 'link'];
+
+  // "?library=<form id>,<entry>,<entry>,…" (one entry number per field of LIBRARY_FIELDS) keeps the form in this
+  // browser; "?library=off" forgets it. Only a browser that opened the link shows the button, so other teachers
+  // do not send to the library. The parameter is removed from the address after it is read.
+  function parseLibrary(value) {
+    var parts = String(value || '').split(',').map(function (s) { return s.trim(); });
+    if (parts.length !== LIBRARY_FIELDS.length + 1 || !/^[\w-]{20,}$/.test(parts[0])) return null;
+    var fields = {};
+    for (var i = 0; i < LIBRARY_FIELDS.length; i++) {
+      if (!/^\d+$/.test(parts[i + 1])) return null;
+      fields[LIBRARY_FIELDS[i]] = 'entry.' + parts[i + 1];
+    }
+    return { form: parts[0], fields: fields };
+  }
+
+  function setupLibrary() {
+    var params = new URLSearchParams(location.search);
+    if (!params.has('library')) return;
+    var value = params.get('library');
+    var lib = value === 'off' ? null : parseLibrary(value);
+    var box = $('libraryMsgs');
+    if (value === 'off') {
+      try { localStorage.removeItem(STORE_LIBRARY); } catch (e) { /* ignore */ }
+      box.appendChild(msgBox('info', 'הספרייה הוסרה מהדפדפן הזה.'));
+    } else if (lib) {
+      save(STORE_LIBRARY, lib);
+      box.appendChild(msgBox('ok', 'הספרייה הוגדרה בדפדפן הזה ✓', ['בשלב הקישור יופיע הכפתור "📚 הוסף לספרייה".']));
+    } else {
+      box.appendChild(msgBox('error', 'קישור ההגדרה של הספרייה לא תקין, ולא נשמר דבר.'));
+    }
+    params.delete('library');
+    var q = params.toString();
+    try { history.replaceState(null, '', location.pathname + (q ? '?' + q : '') + location.hash); } catch (e) { /* ignore */ }
+  }
+
+  function library() {
+    var lib = load(STORE_LIBRARY);
+    return lib && lib.form && lib.fields ? lib : null;
+  }
+
+  // The row sent for a lesson: plain text, as the library's sheet shows it.
+  function libraryRow(lesson, link) {
+    var level = window.Levels.get(lesson.level);
+    var genre = window.Levels.GENRES.filter(function (g) { return g.id === window.Levels.genre(lesson.genre); })[0];
+    return {
+      title: H.stripNikud(lesson.title || '').trim(),
+      topic: H.stripNikud(lesson.topic || (state.request && state.request.topic) || '').trim(),
+      level: level ? level.label : '',
+      genre: genre ? genre.label : '',
+      words: lesson.targetWords.map(function (w) { return H.stripNikud(w.word).trim(); }).filter(Boolean).join(', '),
+      link: link
+    };
+  }
+
+  // A POST to the form, not a GET with the answers in the address: a lesson link can be thousands of characters.
+  // Google's answer cannot be read ("no-cors"), so a sent row is reported as sent, not as received.
+  function sendToLibrary() {
+    var lib = library();
+    if (!lib || !state.link) return;
+    var row = libraryRow(state.lesson, state.link);
+    var body = new URLSearchParams();
+    LIBRARY_FIELDS.forEach(function (f) { body.append(lib.fields[f], row[f]); });
+    var btn = $('addLibrary'), status = U.clear($('libraryStatus'));
+    btn.disabled = true;
+    var sentLink = state.link;
+    fetch('https://docs.google.com/forms/d/e/' + encodeURIComponent(lib.form) + '/formResponse', { method: 'POST', mode: 'no-cors', body: body })
+      .then(function () {
+        status.appendChild(msgBox('ok', 'נשלח לספרייה ✓', ['השיעור "' + row.title + '" נשלח לטופס. מכאן אי אפשר לוודא שהוא נקלט, אז כדאי להציץ בגיליון של הספרייה ולראות שהשורה הגיעה.']));
+        btn.textContent = '📚 נשלח לספרייה';
+      })
+      .catch(function () {
+        if (state.link === sentLink) btn.disabled = false;
+        status.appendChild(msgBox('error', 'השליחה לספרייה נכשלה.', ['בדקו את החיבור לאינטרנט ונסו שוב.']));
+      });
+  }
+
+  // Each new link can be sent once.
+  function renderLibrary() {
+    var btn = $('addLibrary');
+    btn.hidden = !library();
+    btn.disabled = false;
+    btn.textContent = '📚 הוסף לספרייה';
+    U.clear($('libraryStatus'));
   }
 
   /* ---------- Wire up ---------- */
@@ -2215,6 +2306,8 @@
     syncGemini();
     $('compareNikud').addEventListener('click', compareNikud);
     $('copyLink').addEventListener('click', function () { copy(state.link, 'הקישור הועתק!'); });
+    $('addLibrary').addEventListener('click', sendToLibrary);
+    setupLibrary();
     $('downloadJson').addEventListener('click', downloadJson);
     $('printBtn').addEventListener('click', function () {
       var sheet = window.Print.build(state.lesson, { answers: $('printAnswers').checked });
