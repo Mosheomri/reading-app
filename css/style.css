@@ -284,6 +284,16 @@ body.play .wrap { max-width: 900px; padding-top: 0; }
 }
 .topbar { display: flex; align-items: center; gap: 10px; }
 .topbar .progress { flex: 1 1 auto; }
+/* The logo in the top bar: small, still, not a link (it never takes the child out of the lesson).
+   40px high on a phone, under the 44px mute button, so the bar does not get taller there. */
+.top-logo {
+  flex: 0 0 auto;
+  display: block;
+  height: 40px; width: auto;
+  pointer-events: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.top-logo[hidden] { display: none; }
+@media (min-width: 900px) { .top-logo { height: 48px; } }
 .mute-btn {
   flex: 0 0 auto;
   width: 44px; height: 44px;

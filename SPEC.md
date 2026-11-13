@@ -26,7 +26,8 @@ then sends the child a link. The child plays, reads and answers – **no AI, no 
   `assets/logo-web.png` is made from it (margins trimmed, white made transparent, 720 px wide, 128 colors,
   ~20 KB) and shown at the top of the teacher page and both setup pages (there it links to the teacher page;
   up to 300 px wide, 72vw on phones), at the top of the print sheet (48 mm; printing waits until it is
-  decoded, at most 1.5 s), and small (up to 160 px) under the buttons of the child's finish screen.
+  decoded, at most 1.5 s), small (up to 160 px) under the buttons of the child's finish screen, and in the
+  child page's top bar on every other screen (section 4).
 - Vendor LZ-String locally (`js/lz-string.min.js`), do not rely on a CDN.
 - No analytics, no cookies, no tracking. `localStorage` only for conveniences: the teacher's last form values
   and draft, and the child's last reading pace. The one thing sent from the teacher page to anyone but the AI and
@@ -526,6 +527,14 @@ talks with the teacher page (`js/dicta.js`) through `window.postMessage`.
 ## 4. Child page – `play.html`
 
 Fixed order: **Games → Reading → Exercises → Finish**. Progress bar on top.
+
+- **Top bar** (sticky, on every screen): the logo (`#topLogo`, alt "צועדים קדימה עם מיכל"), the progress bar
+  and the mute button, in this order from the right. The logo is 40 px high on phones and tablets and 48 px from
+  900 px wide; on phones it is no taller than the 44 px mute button, so the bar and the story area keep their
+  size. It does not move and is not a link or a button (not focusable, `pointer-events: none`): it never takes
+  the child out of the lesson. Scrolled down on the reading screen it stays in the top bar, clear of the
+  playback bar and the bottom navigation. The finish screen hides it, because that screen already shows the
+  logo under its buttons (one logo per screen); going back from the finish screen shows it again.
 
 ### 4.0 Navigation bar
 - From the first game to the finish, every screen has a bar fixed to the bottom of the screen with two big

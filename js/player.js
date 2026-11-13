@@ -14,6 +14,7 @@
   var stage = document.getElementById('stage');
   var Pics = window.Pics;
   var progressFill = document.getElementById('progressFill');
+  var topLogo = document.getElementById('topLogo');
   var navBar = document.getElementById('nav');
   var navPrev = document.getElementById('navPrev');
   var navNext = document.getElementById('navNext');
@@ -38,6 +39,7 @@
   }
 
   function screen() {
+    topLogo.hidden = false; // the finish screen has its own logo and hides this one
     if (cleanup) { cleanup(); cleanup = null; }
     P.stop(); // a sound from the screen left (and its automatic move on) ends here
     screenId++;
@@ -253,6 +255,7 @@
     var ratio = countable ? right / countable : 1;
     var stars = ratio >= 0.8 ? 3 : ratio >= 0.5 ? 2 : 1;
     var s = screen();
+    topLogo.hidden = true; // its logo is at the bottom of the screen, not twice
     s.appendChild(el('div', { class: 'celebrate pop', 'aria-hidden': 'true' }, '🏆'));
     s.appendChild(el('h1', null, 'כל הכבוד!'));
     s.appendChild(el('div', { class: 'stars', 'aria-label': stars + ' כוכבים' }, '⭐'.repeat(stars)));
